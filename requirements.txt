@@ -1,0 +1,4 @@
+quart>=0.19
+beautifulsoup4>=4.12
+lxml>=5.0
+itsdangerous>=2.1

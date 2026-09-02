@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Plan zajęć — wybór przedmiotów</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-title">
+      <h1>Plan zajęć</h1>
+      <span class="subtitle">kalendarz + wybór przedmiotów</span>
+    </div>
+    <div class="topbar-actions">
+      <div class="week-switch" id="weekSwitch" role="group" aria-label="Wybór tygodnia"></div>
+      <button class="btn btn-ghost" id="resetBtn" type="button" title="Wyczyść wybór (poza obowiązkowymi)">Wyczyść</button>
+    </div>
+    <div class="status-chip" id="statusChip" aria-live="polite"></div>
+  </header>
+
+  <div id="statusPanel" class="status-panel" hidden></div>
+
+  <main class="layout">
+    <section class="calendar card" aria-label="Kalendarz tygodniowy">
+      <div class="cal-scroll">
+        <div class="cal-inner" id="calInner">
+          <div class="cal-head" id="calHead"></div>
+          <div class="cal-body" id="calBody"></div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="picker card" id="picker" aria-label="Wybór przedmiotów"></aside>
+  </main>
+
+  <div id="toast" class="toast" role="alert" hidden></div>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

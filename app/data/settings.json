@@ -1,0 +1,9 @@
+{
+    "constraints_by_categories": [
+        {"key_name": "Zajęcia seminaryjne", "amount": 1},
+        {"key_name": "Zajęcia monograficzne", "amount": 2}
+    ],
+    "constraints_by_series": [
+        {"key_name": "Przedmioty specjalizacyjne", "amount": 1}
+    ]
+}
