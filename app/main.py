@@ -1,9 +1,12 @@
 """Trasy aplikacji: strona główna + API."""
 from __future__ import annotations
 
-from quart import Blueprint, current_app, jsonify, render_template, request
+import os
+
+from quart import Blueprint, Response, current_app, jsonify, render_template, request
 
 from .logic.constraints import evaluate
+from .logic.ics import build_ics
 from .logic.selection import (
     COOKIE_MAX_AGE,
     COOKIE_NAME,
@@ -38,6 +41,25 @@ def _read_selection() -> tuple[list[int], int]:
 def _selection_payload(selected: list[int], week: int) -> dict:
     status = evaluate(current_app.dataset, set(selected))
     return {"selected": selected, "week": week, "status": status}
+
+
+def _zids_from_request() -> set[int]:
+    """Zidy z parametru ``z`` (lista po przecinku; przydatne przy
+    udostępnianiu linkiem — bez cookies); bez ``z`` — wybór z ciasteczka."""
+    ds = current_app.dataset
+    raw_z = request.args.get("z", "")
+    if raw_z:
+        zids: set[int] = set()
+        for chunk in raw_z.split(","):
+            try:
+                zid = int(chunk.strip())
+            except ValueError:
+                continue
+            if zid in ds.offerings:
+                zids.add(zid)
+        return zids
+    selected, _week = _read_selection()
+    return set(selected)
 
 
 @bp.route("/api/selection", methods=["GET"])
@@ -88,3 +110,50 @@ async def api_delete_selection() -> dict:
     response = jsonify(_selection_payload([], MIN_WEEK))
     response.delete_cookie(COOKIE_NAME)
     return response
+
+
+@bp.route("/api/selection.ics")
+async def api_selection_ics() -> Response:
+    """Kalendarz iCalendar wybranego planu.
+
+    Parametr ``z`` (lista zid po przecinku) pozwala pobrać konkretny wybór
+    (przydatne przy udostępnianiu linku — bez cookies). Bez ``z`` serwowany
+    jest wybór z ciasteczka.
+    """
+    ds = current_app.dataset
+    zids = _zids_from_request()
+
+    ics = build_ics(ds, zids)
+    return Response(
+        ics,
+        content_type="text/calendar; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="plan-zajec.ics"'},
+    )
+
+
+@bp.route("/api/selection.pdf")
+async def api_selection_pdf() -> Response | tuple[Response, int]:
+    """Wektorowy PDF planu renderowany przez serwer (Playwright/Chromium).
+
+    Parametry: ``z`` (jak w ``/api/selection.ics``) oraz ``view``
+    (``sum``/``A``/``B``/``w1``–``w4``). Chromium otwiera ``/?z=...&view=...``,
+    emuluje tryb wydruku (te same style co „Drukuj (1 strona)”) i zwraca
+    jednostronicowy PDF A4. Gdy Playwright/Chromium są niedostępne — 503,
+    a strona sama spada na eksport PDF po stronie przeglądarki.
+    """
+    from .logic.pdf import PlaywrightUnavailable, render_pdf
+
+    zids = _zids_from_request()
+    view = request.args.get("view", "sum")
+    base_url = os.environ.get("PDF_BASE_URL") or request.host_url
+    try:
+        pdf = await render_pdf(base_url, zids, view)
+    except PlaywrightUnavailable as exc:
+        current_app.logger.warning("Serwerowy PDF niedostępny: %s", exc)
+        return jsonify({"error": "Generator PDF niedostępny na serwerze"}), 503
+
+    return Response(
+        pdf,
+        content_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="plan-zajec.pdf"'},
+    )

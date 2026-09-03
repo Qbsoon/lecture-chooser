@@ -207,6 +207,8 @@ class Dataset:
     series: list[Series]
     offerings: dict[int, Offering] = field(default_factory=dict)
     unassigned: list[TimetableEntry] = field(default_factory=list)  # bez zid lub nieznany zid
+    semester_start: str | None = None  # ISO daty poniedziałku 1. tygodnia semestru (eksport .ics)
+    semester_weeks: int | None = None  # ile tygodni semestru obejmuje eksport .ics
 
     def category_by_id(self, cat_id: str) -> Category | None:
         return next((c for c in self.categories if c.id == cat_id), None)
@@ -217,4 +219,6 @@ class Dataset:
             "series": [s.to_dict() for s in self.series],
             "unassigned": [e.to_dict() for e in self.unassigned],
             "cycles": CYCLES_LEGEND,
+            "semester_start": self.semester_start,
+            "semester_weeks": self.semester_weeks,
         }

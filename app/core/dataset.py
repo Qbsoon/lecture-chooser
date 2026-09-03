@@ -64,6 +64,8 @@ def build_dataset(loader: DataLoader) -> Dataset:
         series=series,
         offerings=offerings,
         unassigned=dropped,
+        semester_start=settings.get("semester_start"),
+        semester_weeks=settings.get("semester_weeks"),
     )
 
 

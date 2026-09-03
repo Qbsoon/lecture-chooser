@@ -14,12 +14,40 @@
     </div>
     <div class="topbar-actions">
       <div class="week-switch" id="weekSwitch" role="group" aria-label="Wybór tygodnia"></div>
+      <select class="theme-select" id="themeSelect" aria-label="Motyw kolorystyczny" title="Motyw kolorystyczny strony">
+        <option value="auto">Motyw: auto</option>
+        <option value="light">Jasny</option>
+        <option value="dark">Ciemny</option>
+        <option value="forest">Zieleń</option>
+        <option value="violet">Fiolet</option>
+        <option value="rose">Wrzos</option>
+      </select>
+      <details class="dropdown" id="downloadMenu">
+        <summary class="btn" title="Eksport wybranego planu">Pobierz</summary>
+        <div class="dropdown-menu" role="menu" aria-label="Format eksportu">
+          <button type="button" role="menuitem" data-export="ics" title="Kalendarz do importu w Google Calendar / Outlook / telefonie">Kalendarz (.ics)</button>
+          <button type="button" role="menuitem" data-export="pdf" title="Wektorowy PDF (zaznaczalny tekst) renderowany przez serwer; gdy serwer nie ma Chromium — wersja z przeglądarki">PDF (plik)</button>
+          <button type="button" role="menuitem" data-export="print" title="Okno wydruku — cały kalendarz zmieści się na jednej stronie">Drukuj (1 strona)</button>
+          <button type="button" role="menuitem" data-export="csv" title="Tabela planu do arkusza">CSV (tabela)</button>
+          <button type="button" role="menuitem" data-export="json" title="Kopia wyboru do własnego backupu">JSON (kopia wyboru)</button>
+          <button type="button" role="menuitem" data-export="png" title="Obraz aktualnego widoku kalendarza">PNG (obraz)</button>
+          <div class="dropdown-sep" role="separator"></div>
+          <div class="dropdown-sub" id="gcalSub">
+            <button type="button" role="menuitem" class="gcal-toggle" title="Dodaje zajęcia jako wydarzenia we własnym kalendarzu Google">Google Calendar</button>
+            <div class="gcal-list" id="gcalList"></div>
+          </div>
+        </div>
+      </details>
+      <button class="btn" id="shareBtn" type="button" title="Skopiuj link do tego planu (na telefonie — systemowe udostępnianie)">Udostępnij</button>
       <button class="btn btn-ghost" id="resetBtn" type="button" title="Wyczyść wybór (poza obowiązkowymi)">Wyczyść</button>
     </div>
     <div class="status-chip" id="statusChip" aria-live="polite"></div>
   </header>
 
   <div id="statusPanel" class="status-panel" hidden></div>
+
+  <!-- nagłówek tylko przy wydruku (PDF) -->
+  <div id="printHead"></div>
 
   <main class="layout">
     <section class="calendar card" aria-label="Kalendarz tygodniowy">

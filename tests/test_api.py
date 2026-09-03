@@ -117,3 +117,77 @@ def test_put_ignores_unknown_zids():
             assert data["week"] == 1  # nieprawidłowy tydzień -> 1
 
     run(scenario())
+
+
+def test_selection_pdf_ok():
+    """Endpoint PDF z działającym (zamockowanym) rendererem serwerowym."""
+    app = _app()
+    zid = 765361
+
+    async def scenario():
+        from app.logic import pdf as pdf_mod
+
+        calls = []
+
+        async def fake_render(base_url, zids, view="sum"):
+            calls.append((sorted(zids), view))
+            return b"%PDF-1.4 fake"
+
+        original = pdf_mod.render_pdf
+        pdf_mod.render_pdf = fake_render
+        try:
+            async with app.test_client() as client:
+                res = await client.get(f"/api/selection.pdf?z={zid}&view=A")
+        finally:
+            pdf_mod.render_pdf = original
+
+        assert res.status_code == 200
+        assert res.content_type.startswith("application/pdf")
+        assert 'filename="plan-zajec.pdf"' in res.headers["Content-Disposition"]
+        assert (await res.get_data()).startswith(b"%PDF")
+        assert calls == [([zid], "A")]
+
+    run(scenario())
+
+
+def test_selection_pdf_503_when_renderer_unavailable():
+    """Bez Playwrighta/Chromium endpoint zwraca 503 (strona spada na
+    PDF generowany w przeglądarce)."""
+    app = _app()
+
+    async def scenario():
+        from app.logic import pdf as pdf_mod
+        from app.logic.pdf import PlaywrightUnavailable
+
+        async def unavailable(base_url, zids, view="sum"):
+            raise PlaywrightUnavailable("brak Chromium")
+
+        original = pdf_mod.render_pdf
+        pdf_mod.render_pdf = unavailable
+        try:
+            async with app.test_client() as client:
+                res = await client.get("/api/selection.pdf")
+        finally:
+            pdf_mod.render_pdf = original
+
+        assert res.status_code == 503
+        data = await res.get_json()
+        assert "error" in data
+
+    run(scenario())
+
+
+def test_ics_with_z_param():
+    """Parametr z nadpisuje ciasteczko w .ics (wspólny _zids_from_request)."""
+    app = _app()
+    zid = 765361
+
+    async def scenario():
+        async with app.test_client() as client:
+            res = await client.get(f"/api/selection.ics?z={zid}")
+            assert res.status_code == 200
+            assert res.content_type.startswith("text/calendar")
+            body = (await res.get_data()).decode()
+            assert "BEGIN:VCALENDAR" in body
+
+    run(scenario())

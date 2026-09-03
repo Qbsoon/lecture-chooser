@@ -46,9 +46,15 @@ Do własnej lokalizacji służy zmienna `DATA_DIR`.
 | GET | `/api/selection` | aktualny wybór z ciasteczka + status walidacji |
 | PUT | `/api/selection` | zapis wyboru `{selected: [zid], week: 1..4}` (ustawia ciasteczko); 409 przy wyborze naruszającym limity |
 | DELETE | `/api/selection` | wyczyszczenie wyboru i ciasteczka |
+| GET | `/api/selection.ics` | kalendarz iCalendar (parametr `z` — wybór z linku, bez cookies) |
+| GET | `/api/selection.pdf` | **wektorowy** PDF planu (`z`, `view=sum\|A\|B\|w1..w4`); 503, gdy serwer nie ma Playwright/Chromium — wtedy strona sama generuje PDF w przeglądarce |
 
 Wybór jest pamiętany w podpisanym ciasteczku (httponly) — odświeżenie strony
 przywraca ostatni stan. Kolizje godzinowe są raportowane jako ostrzeżenia.
+
+Przycisk **„Udostępnij”** kopiuje link do planu (`/?z=...&view=...`; na telefonie
+otwiera natywne okno udostępniania). Plan otwarty z takiego linku **nie nadpisuje**
+własnego wyboru odbiorcy — ten pozostaje w jego ciasteczku.
 
 ## Testy
 
@@ -70,6 +76,16 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 CMD ["hypercorn", "--bind", "0.0.0.0:8000", "app:app"]
 ```
+
+Serwerowy PDF (Playwright + Chromium) wymaga w obrazie dodatkowo
+(przydatne też `fonts-liberation`, żeby system-ui miał polskie znaki):
+
+```dockerfile
+RUN playwright install --with-deps chromium
+```
+
+Bez tego `/api/selection.pdf` zwraca 503, a „PDF (plik)” spada na wersję
+generowaną w przeglądarce (kalendarz jako obraz osadzony w PDF).
 
 ## Rozszerzalność
 

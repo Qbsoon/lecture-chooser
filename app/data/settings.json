@@ -5,5 +5,7 @@
     ],
     "constraints_by_series": [
         {"key_name": "Przedmioty specjalizacyjne", "amount": 1}
-    ]
+    ],
+    "semester_start": "2026-10-05",
+    "semester_weeks": 15
 }

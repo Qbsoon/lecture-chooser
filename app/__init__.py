@@ -7,6 +7,7 @@ from quart import Quart
 
 from .core.dataset import build_dataset
 from .core.source import FileDataLoader
+from .logic.pdf import close_pdf_renderer
 from .main import bp
 
 
@@ -18,6 +19,12 @@ def create_app(data_dir: str | None = None) -> Quart:
     app.dataset = build_dataset(FileDataLoader(data_dir))
 
     app.register_blueprint(bp)
+
+    # zamykamy współdzielone Chromium generatora PDF przy zatrzymaniu aplikacji
+    @app.after_serving
+    async def _close_pdf_renderer() -> None:
+        await close_pdf_renderer()
+
     return app
 
 
