@@ -92,8 +92,39 @@ function cyclesOverlap(a, b) {
   return [1, 2, 3, 4].some((w) => cycleMatches(a, w) && cycleMatches(b, w));
 }
 
+// Tydzień semestru dla wpisu datowanego (zajęcia w cyklu nieregularnym).
+// Lustro week_of_date() z app/core/models.py. Daty liczone na POŁUDNIE —
+// przesunięcie DST (październik) nie psuje doby; bazę normalizujemy do
+// poniedziałku, bo semesterStart może wypaść w dowolny dzień tygodnia.
+function weekOfDate(iso) {
+  const base = new Date(`${semesterStart}T12:00:00`);
+  const day = new Date(`${iso}T12:00:00`);
+  if (isNaN(day) || isNaN(base)) return null;
+  base.setDate(base.getDate() - ((base.getDay() + 6) % 7));
+  const w = Math.round((day - base) / 86400000 / 7) + 1;
+  return w >= 1 ? w : null;
+}
+
+// Czy dwa wpisy mogą się spotkać w tym samym tygodniu — lustro
+// entries_meet() z app/core/models.py (wpisy datowane vs cykliczne).
+function entriesMeet(e1, e2) {
+  if (e1.date && e2.date) return e1.date === e2.date;
+  if (e1.date || e2.date) {
+    const dated = e1.date ? e1 : e2;
+    const cyclic = e1.date ? e2 : e1;
+    const w = weekOfDate(dated.date);
+    return w !== null && cycleMatches(cyclic.cycle, w);
+  }
+  return cyclesOverlap(e1.cycle, e2.cycle);
+}
+
 function cycleBadge(cycle) {
   return cycle && cycle !== "T" ? h("span", { class: "badge", title: CYCLE_LABELS[cycle] || cycle, text: cycle }) : null;
+}
+
+// Odznaka daty dla wpisu jednorazowego (zamiast odznaki cyklu).
+function dateBadge(iso) {
+  return h("span", { class: "badge", title: "zajęcia jednorazowe (cykl nieregularny)", text: iso });
 }
 
 function offeringTimes(offering) {
@@ -105,7 +136,7 @@ function offeringTimes(offering) {
     if (e.hybrid) bits.push("hybrydowe");
     const suffix = bits.length ? " · " + bits.join(" · ") : "";
     const line = h("span", { text: `${DAY_SHORT[e.day]} ${fmtTime(e.start)}–${fmtTime(e.end)}${suffix}` });
-    return h("span", {}, line, cycleBadge(e.cycle));
+    return h("span", {}, line, e.date ? dateBadge(e.date) : cycleBadge(e.cycle));
   });
   return h("div", { class: "times" }, ...parts);
 }
@@ -149,6 +180,27 @@ function seriesActiveCount(series) {
   }).length;
 }
 
+// Punkty ECTS z zapisu "Z/3" / "Zbo/10" (część po ukośniku) — lustro Offering.ects.
+function offeringEcts(o) {
+  const tail = String(o.points || "").split("/").pop().trim();
+  return /^\d+$/.test(tail) ? parseInt(tail, 10) : 0;
+}
+
+// Sumy (godziny, ECTS) wybranych pozycji kursów kategorii — jak _category_sums
+// po stronie serwera; część pojedyncza (bez grup) liczy się w całości.
+function categorySums(cat) {
+  let hours = 0, points = 0;
+  for (const course of cat.courses) {
+    if (!courseState(course).active) continue;
+    for (const part of course.parts) {
+      const chosen = part.offerings.filter((o) => selected.has(o.zid));
+      const rows = chosen.length ? chosen : (part.offerings.length === 1 ? part.offerings : []);
+      for (const o of rows) { hours += o.hours; points += offeringEcts(o); }
+    }
+  }
+  return { hours, points };
+}
+
 function localStatus() {
   const errors = [], missing = [], warnings = [];
   const progress = [];
@@ -183,12 +235,32 @@ function localStatus() {
         const n = cat.required - active.length;
         missing.push(`Kategoria „${cat.name}”: wybierz jeszcze ${n} ${n === 1 ? "przedmiot" : "przedmioty"}`);
       }
+    } else if (cat.mode === "hours_ects") {
+      const { hours, points } = categorySums(cat);
+      if (cat.required_hours != null) {
+        if (hours > cat.required_hours) {
+          errors.push(`Kategoria „${cat.name}”: przekroczono limit godzin (${hours}/${cat.required_hours} godz.)`);
+        } else if (hours < cat.required_hours) {
+          missing.push(`Kategoria „${cat.name}”: dobierz jeszcze ${cat.required_hours - hours} godz. (${hours}/${cat.required_hours})`);
+        }
+      }
+      if (cat.required_points != null) {
+        if (points > cat.required_points) {
+          errors.push(`Kategoria „${cat.name}”: przekroczono limit punktów ECTS (${points}/${cat.required_points} pkt.)`);
+        } else if (points < cat.required_points) {
+          missing.push(`Kategoria „${cat.name}”: dobierz jeszcze ${cat.required_points - points} pkt. ECTS (${points}/${cat.required_points})`);
+        }
+      }
     }
 
-    progress.push({
+    const entry = {
       id: cat.id, name: cat.name, mode: cat.mode,
       required: cat.required, selected: active.length, total: cat.courses.length,
-    });
+    };
+    if (cat.mode === "hours_ects") {
+      Object.assign(entry, categorySums(cat), { required_hours: cat.required_hours, required_points: cat.required_points });
+    }
+    progress.push(entry);
   }
 
   for (const s of dataset.series) {
@@ -223,7 +295,7 @@ function localStatus() {
       const { e: e2, name: n2 } = placed[j];
       if (e2.day !== e1.day || e2.start >= e1.end) break;
       if (e1.start >= e2.end) continue;
-      if (!cyclesOverlap(e1.cycle, e2.cycle)) continue;
+      if (!entriesMeet(e1, e2)) continue; // wpisy datowane vs cykliczne — jak na serwerze
       warnings.push(
         `Kolizja: „${n1}” (${fmtTime(e1.start)}–${fmtTime(e1.end)}) z „${n2}” (${fmtTime(e2.start)}–${fmtTime(e2.end)})`
       );
@@ -297,6 +369,20 @@ function countChip(selectedN, required, opts = {}) {
   else if (required != null && selectedN === required) cls.push("done");
   else if (opts.doneWhen && selectedN > 0) cls.push("done");
   return h("span", { class: cls.join(" "), text });
+}
+
+// Chip kategorii godzinowo-punktowej ("hours_ects"): "60/120 godz. · 6/12 pkt."
+function hoursChip(cat) {
+  const { hours, points } = categorySums(cat);
+  const over = (cat.required_hours != null && hours > cat.required_hours) ||
+               (cat.required_points != null && points > cat.required_points);
+  const done = !over &&
+    (cat.required_hours == null || hours === cat.required_hours) &&
+    (cat.required_points == null || points === cat.required_points);
+  const parts = [];
+  if (cat.required_hours != null) parts.push(`${hours}/${cat.required_hours} godz.`);
+  if (cat.required_points != null) parts.push(`${points}/${cat.required_points} pkt.`);
+  return h("span", { class: "count-chip" + (over ? " over" : done ? " done" : ""), text: parts.join(" · ") });
 }
 
 function renderCourse(cat, course) {
@@ -444,7 +530,7 @@ function renderPicker() {
       [
         h("span", { class: "dot", style: `background:${catColor.get(cat.id)}` }),
         h("span", { text: cat.name }),
-        countChip(active, cat.required),
+        cat.mode === "hours_ects" ? hoursChip(cat) : countChip(active, cat.required),
       ],
       [
         cat.note ? h("p", { class: "p-note", text: cat.note }) : null,
@@ -468,13 +554,27 @@ function viewMatches(cycle) {
   }
 }
 
+// Czy wpis (cykliczny LUB datowany) pasuje do aktualnego widoku.
+// Wpis datowany występuje dokładnie raz — w tygodniu wynikającym z daty.
+function entryInView(e) {
+  if (!e.date) return viewMatches(e.cycle);
+  const w = weekOfDate(e.date);
+  if (w === null) return view === "sum";
+  switch (view) {
+    case "sum": return true;
+    case "A": return w % 2 === 1;
+    case "B": return w % 2 === 0;
+    default: return Number(view.slice(1)) === w;
+  }
+}
+
 function displayedEntries() {
   const out = [];
   for (const zid of selected) {
     const info = courseIndex.get(zid);
     if (!info) continue;
     for (const e of info.offering.timetable) {
-      if (viewMatches(e.cycle)) out.push({ e, ...info });
+      if (entryInView(e)) out.push({ e, ...info });
     }
   }
   return out;
@@ -495,7 +595,7 @@ function collidingZids() {
       const { e: e2, zid: z2 } = placed[j];
       if (e2.day !== e1.day || e2.start >= e1.end) break;
       if (e1.start >= e2.end) continue;
-      if (!cyclesOverlap(e1.cycle, e2.cycle)) continue;
+      if (!entriesMeet(e1, e2)) continue;
       bad.add(z1); bad.add(z2);
     }
   }
@@ -516,7 +616,7 @@ function renderCalendar() {
     const info = courseIndex.get(zid);
     if (!info) continue;
     for (const e of info.offering.timetable) {
-      if (viewMatches(e.cycle)) entries.push({ e, ...info, preview: true });
+      if (entryInView(e)) entries.push({ e, ...info, preview: true });
     }
   }
 
@@ -591,7 +691,7 @@ function renderCalendar() {
             ? h("span", { class: "badge", text: "online" })
             : (e.room ? h("span", { class: "badge", text: e.room }) : null),
           e.hybrid ? h("span", { class: "badge hybrid", text: "hybrydowe" }) : null,
-          cycleBadge(e.cycle),
+          e.date ? dateBadge(e.date) : cycleBadge(e.cycle),
         ),
         h("div", { class: "meta teacher", text: `${fmtTime(e.start)}–${fmtTime(e.end)} · ${e.teacher || ""}` }),
       );
@@ -719,7 +819,7 @@ function exportCSV() {
     const s = String(v ?? "");
     return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
-  const rows = [["Przedmiot", "Typ", "Grupa", "Dzień", "Od", "Do", "Cykl", "Miejsce", "Prowadzący"]];
+  const rows = [["Przedmiot", "Typ", "Grupa", "Dzień", "Od", "Do", "Cykl/Data", "Miejsce", "Prowadzący"]];
   for (const { offering: o, course, entries } of selectedEntries()) {
     if (!entries.length) {
       rows.push([course.name, o.kind, o.group || "", "—", "", "", "", "", o.teachers.join(", ")]);
@@ -727,7 +827,7 @@ function exportCSV() {
     for (const e of entries) {
       rows.push([
         course.name, o.kind, o.group || "", DAY_NAMES[e.day], fmtTime(e.start), fmtTime(e.end),
-        CYCLE_LABELS[e.cycle] || e.cycle,
+        e.date || (CYCLE_LABELS[e.cycle] || e.cycle),
         [e.online ? "ONLINE" : e.room, e.hybrid ? "hybrydowe" : null].filter(Boolean).join(" ") || "",
         e.teacher || o.teachers.join(", "),
       ]);
@@ -743,7 +843,7 @@ function exportJSON() {
     kind: o.kind, group: o.group, teachers: o.teachers,
     timetable: entries.map((e) => ({
       day: DAY_NAMES[e.day], start: fmtTime(e.start), end: fmtTime(e.end),
-      cycle: e.cycle, room: e.room, online: e.online, hybrid: e.hybrid, teacher: e.teacher,
+      cycle: e.cycle, date: e.date || null, room: e.room, online: e.online, hybrid: e.hybrid, teacher: e.teacher,
     })),
   }));
   downloadFile("wybor-planu.json", JSON.stringify({
@@ -765,15 +865,39 @@ function gcalLinks() {
   const p2 = (n) => String(n).padStart(2, "0");
   for (const { offering: o, course, category, entries } of selectedEntries()) {
     for (const e of entries) {
+      const stamp = (day, m) =>
+        `${day.getFullYear()}${p2(day.getMonth() + 1)}${p2(day.getDate())}` +
+        `T${p2(Math.floor(m / 60))}${p2(m % 60)}00`;
+
+      // wpis datowany: jedno wydarzenie w konkretnym dniu (cykl nieregularny)
+      if (e.date) {
+        const day = new Date(`${e.date}T00:00:00`);
+        if (isNaN(day)) continue;
+        const params = new URLSearchParams({
+          action: "TEMPLATE",
+          text: `${course.name} (${o.group || o.kind})`,
+          dates: `${stamp(day, e.start)}/${stamp(day, e.end)}`,
+          location: [e.online ? "ONLINE" : e.room, e.hybrid ? "hybrydowe" : null].filter(Boolean).join(" ") || "—",
+          details: [
+            `${o.kind} · ${category.name}`,
+            e.teacher || o.teachers.join(", "),
+            `termin jednorazowy: ${e.date} (zajęcia w cyklu nieregularnym)`,
+          ].filter(Boolean).join("\n"),
+          ctz: "Europe/Warsaw",
+        });
+        links.push({
+          label: `${e.date} ${fmtTime(e.start)}–${fmtTime(e.end)} · ${course.name}${o.group ? ` (${o.group})` : ""}`,
+          href: `https://calendar.google.com/calendar/render?${params}`,
+        });
+        continue;
+      }
+
       // tygodnie semestru, w których odbywają się te zajęcia (wg cyklu)
       const weeks = [];
       for (let w = 1; w <= semesterWeeks; w++) if (cycleMatches(e.cycle, w)) weeks.push(w);
       if (!weeks.length) continue;
       const day = new Date(base);
       day.setDate(day.getDate() + (weeks[0] - 1) * 7 + e.day);
-      const stamp = (m) =>
-        `${day.getFullYear()}${p2(day.getMonth() + 1)}${p2(day.getDate())}` +
-        `T${p2(Math.floor(m / 60))}${p2(m % 60)}00`;
 
       // Powtarzanie: gdy tygodnie tworzą prostą progresję co 1/2/4 tyg.,
       // dokładamy RRULE (Google nie dokumentuje parametru recur — best effort;
@@ -793,7 +917,7 @@ function gcalLinks() {
       const params = new URLSearchParams({
         action: "TEMPLATE",
         text: `${course.name} (${o.group || o.kind})`,
-        dates: `${stamp(e.start)}/${stamp(e.end)}`,
+        dates: `${stamp(day, e.start)}/${stamp(day, e.end)}`,
         location: [e.online ? "ONLINE" : e.room, e.hybrid ? "hybrydowe" : null].filter(Boolean).join(" ") || "—",
         details: [
           `${o.kind} · ${category.name}`,
@@ -973,7 +1097,8 @@ function drawCalendarCanvas() {
           offering.group || offering.kind,
           e.online ? "online" : e.room,
           e.hybrid ? "hybrydowe" : null,
-          e.cycle && e.cycle !== "T" ? `cykl ${e.cycle}` : null,
+          e.date ? `termin ${e.date}`
+            : (e.cycle && e.cycle !== "T" ? `cykl ${e.cycle}` : null),
         ].filter(Boolean).join(" · ");
         for (const ln of wrapLines(ctx, meta, bw - pad * 2).slice(0, 2)) {
           ctx.fillText(ln, bx + pad, ty);

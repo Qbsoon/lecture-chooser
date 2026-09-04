@@ -6,3 +6,6 @@ itsdangerous>=2.1
 # endpoint zwraca 503, a PDF powstaje w przeglądarce).
 # Wymaga też przeglądarki: `playwright install chromium`
 playwright>=1.40
+# Klient HTTP do scrapingu e-KUL (app/scraping/client.py) — logowanie,
+# sesja i przepływ formularzy qlplan/qlprogram.
+httpx>=0.27

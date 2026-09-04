@@ -2,15 +2,16 @@
 
 Terminy w rozkładzie opisują cykl (T/A/B/C/D/1-4), a nie konkretne daty,
 więc rozwijamy je na wydarzenia licząc tygodnie od poniedziałku pierwszego
-tygodnia semestru (`semester_start` w settings.json).
+tygodnia semestru (`semester_start` w settings.json). Wyjątkiem są wpisy
+„w cyklu nieregularnym” (pole ``date``): te trafiają do kalendarza jako
+pojedyncze wydarzenia w swojej konkretnej dacie.
 """
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 
-from ..core.models import Dataset, cycle_matches
+from ..core.models import Dataset, cycle_matches, semester_monday
 
-DEFAULT_SEMESTER_START = "2026-10-05"  # poniedziałek 1. tygodnia semestru
 DEFAULT_SEMESTER_WEEKS = 15
 
 CRLF = "\r\n"
@@ -52,20 +53,10 @@ def _dt(day: date, minutes: int) -> str:
     return f"{day:%Y%m%d}T{minutes // 60:02d}{minutes % 60:02d}00"
 
 
-def _semester_start(dataset: Dataset) -> date:
-    try:
-        start = date.fromisoformat(str(dataset.semester_start or DEFAULT_SEMESTER_START))
-    except ValueError:
-        start = date.fromisoformat(DEFAULT_SEMESTER_START)
-    if start.weekday() != 0:
-        # cykle liczymy od poniedziałka 1. tygodnia semestru
-        start -= timedelta(days=start.weekday())
-    return start
-
 
 def build_ics(dataset: Dataset, zids: set[int]) -> str:
     """Buduje treść .ics dla wybranych offeringów (identyfikowanych przez zid)."""
-    start = _semester_start(dataset)
+    start = semester_monday(dataset.semester_start)
     try:
         weeks = int(dataset.semester_weeks or DEFAULT_SEMESTER_WEEKS)
     except (TypeError, ValueError):
@@ -85,26 +76,45 @@ def build_ics(dataset: Dataset, zids: set[int]) -> str:
             continue
         offering, course, category = found
         for entry in offering.timetable:
+            location = (
+                ("ONLINE" + (" — hybrydowe" if entry.hybrid else ""))
+                if entry.online
+                else ((entry.room or "") + (" — hybrydowe" if entry.hybrid else ""))
+            )
+            desc = [offering.kind, category.name]
+            teacher = entry.teacher or ", ".join(offering.teachers)
+            if teacher:
+                desc.append(teacher)
+            if entry.hybrid:
+                desc.append("zajęcia hybrydowe")
+
+            if entry.date:
+                # wpis „w cyklu nieregularnym” — wydarzenie jednorazowe
+                # w konkretnej dacie (poza schematem tygodni/cykli)
+                try:
+                    day = date.fromisoformat(entry.date)
+                except ValueError:
+                    continue
+                desc.append(f"termin jednorazowy: {entry.date}")
+                events.append((
+                    (day, entry.start),
+                    f"{zid}-{entry.date}-{entry.start}@lecture-chooser",
+                    f"{course.name} ({offering.group or offering.kind})",
+                    _dt(day, entry.start),
+                    _dt(day, entry.end),
+                    location,
+                    " · ".join(desc),
+                    category.name,
+                ))
+                continue
+
+            if str(entry.cycle or "T").upper() != "T":
+                desc.append(f"cykl {entry.cycle}")
+
             for week in range(1, weeks + 1):
                 if not cycle_matches(entry.cycle, week):
                     continue
                 day = start + timedelta(weeks=week - 1, days=entry.day)
-
-                if entry.online:
-                    location = "ONLINE" + (" — hybrydowe" if entry.hybrid else "")
-                elif entry.room:
-                    location = entry.room + (" — hybrydowe" if entry.hybrid else "")
-                else:
-                    location = ""
-
-                desc = [offering.kind, category.name]
-                teacher = entry.teacher or ", ".join(offering.teachers)
-                if teacher:
-                    desc.append(teacher)
-                if entry.hybrid:
-                    desc.append("zajęcia hybrydowe")
-                if str(entry.cycle or "T").upper() != "T":
-                    desc.append(f"cykl {entry.cycle}")
 
                 events.append((
                     (day, entry.start),

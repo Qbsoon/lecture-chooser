@@ -1,13 +1,22 @@
-"""Testy logiki ograniczeń na rzeczywistym datasecie."""
+"""Testy logiki ograniczeń na rzeczywistym datasecie (scraped)."""
 from __future__ import annotations
 
 from pathlib import Path
+
+import pytest
 
 from app.core.dataset import build_dataset
 from app.core.source import FileDataLoader
 from app.logic.constraints import evaluate
 
 REPO = Path(__file__).resolve().parents[1]
+_SCRAPE_DIR = REPO / "app" / "data" / "scraped" / "6089" / "1"
+if not (_SCRAPE_DIR / "plan.html").is_file() or not (_SCRAPE_DIR / "week.html").is_file():
+    pytest.skip(
+        "brak danych scraped (kid=6089 etap=1) — uruchom "
+        "`python scripts/scrape.py course --wid 5368 --kid 6089 --save`",
+        allow_module_level=True,
+    )
 
 
 def _dataset():
@@ -32,7 +41,7 @@ def test_dataset_shape():
     ids = [c.id for c in ds.categories]
     assert "obligatory" in ids
     assert len(ds.series) == 1
-    # ograniczenia z settings.json
+    # ograniczenia z notek tabeli planu (krok 3)
     sem = next(c for c in ds.categories if "seminaryjne" in c.name.lower())
     assert sem.required == 1
     mon = next(c for c in ds.categories if "monograficzne" in c.name.lower())
@@ -95,7 +104,7 @@ def test_two_groups_same_part_is_error():
 
 def test_time_collision_is_warning():
     ds = _dataset()
-    # Teoria lab Grupa 1 (pon 09:10-10:00) vs Bezpieczeństwo seminarium (pon 09:10-09:50)
-    status = evaluate(ds, {765361, 758196})
+    # Teoria lab Grupa 4 (pon 10:00-10:50) vs Bezpieczeństwo seminarium (pon 09:10-10:50)
+    status = evaluate(ds, {765362, 758196})
     assert status["ok"] is True
     assert any("Kolizja" in w for w in status["warnings"])

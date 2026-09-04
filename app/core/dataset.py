@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 
 from .models import Category, Course, Dataset, Offering, Part
-from .parsers import amount_from_note, parse_plan_table, parse_week_table
+from .parsers import parse_plan_table, parse_week_table
 from .source import DataLoader
 
 logger = logging.getLogger(__name__)
@@ -19,7 +19,8 @@ def build_dataset(loader: DataLoader) -> Dataset:
     entries = parse_week_table(loader.load_week())
     settings = loader.load_settings()
 
-    _apply_settings(categories, series, settings)
+    # Ograniczenia (tryby/limity kategorii i serii) wynikają w całości
+    # z notek w tabeli planu — patrz parse_note w parsers.py.
 
     offerings: dict[int, Offering] = {}
     for category in categories:
@@ -67,37 +68,6 @@ def build_dataset(loader: DataLoader) -> Dataset:
         semester_start=settings.get("semester_start"),
         semester_weeks=settings.get("semester_weeks"),
     )
-
-
-def _apply_settings(categories: list[Category], series_list: list, settings: dict) -> None:
-    """Nakłada ograniczenia z settings.json (z fallbackiem na notki z tabel)."""
-    cat_amounts = {
-        item.get("key_name"): item.get("amount")
-        for item in settings.get("constraints_by_categories", [])
-        if isinstance(item, dict)
-    }
-    series_amounts = {
-        item.get("key_name"): item.get("amount")
-        for item in settings.get("constraints_by_series", [])
-        if isinstance(item, dict)
-    }
-
-    for category in categories:
-        if category.is_obligatory or category.series:
-            category.mode = "all"
-            category.required = None
-            continue
-        if category.id == UNASSIGNED_CATEGORY_ID:
-            category.mode = "free"
-            category.required = None
-            continue
-        category.mode = "exact"
-        amount = cat_amounts.get(category.name) or amount_from_note(category.note)
-        category.required = int(amount) if amount else len(category.courses)
-
-    for s in series_list:
-        amount = series_amounts.get(s.name) or amount_from_note(s.note)
-        s.required = int(amount) if amount else 1
 
 
 def _build_unassigned_category(unassigned: list) -> Category | None:

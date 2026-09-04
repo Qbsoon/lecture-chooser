@@ -2,6 +2,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date, timedelta
+
+# Poniedziałek 1. tygodnia semestru (domyślny start z settings.json).
+DEFAULT_SEMESTER_START = "2026-10-05"
 
 # Legenda oznaczeń cyklu zajęć (używana też w API/interfejsie).
 CYCLES_LEGEND: dict[str, str] = {
@@ -48,9 +52,62 @@ def cycles_overlap(cycle_a: str, cycle_b: str) -> bool:
     )
 
 
+def semester_monday(semester_start: str | None) -> date:
+    """Poniedziałek 1. tygodnia semestru (normalizacja ``settings.semester_start``)."""
+    try:
+        start = date.fromisoformat(str(semester_start or DEFAULT_SEMESTER_START))
+    except ValueError:
+        start = date.fromisoformat(DEFAULT_SEMESTER_START)
+    if start.weekday() != 0:
+        # cykle i daty liczymy od poniedziałku 1. tygodnia semestru
+        start -= timedelta(days=start.weekday())
+    return start
+
+
+def week_of_date(day: str | date | None, semester_start: str | None) -> int | None:
+    """Tydzień semestru (1-based), w którym wypada data; ``None`` poza semestrem.
+
+    Służy do wpinania wpisów datowanych („cykl nieregularny”, konkretne daty
+    w ``TimetableEntry.date``) w tygodnie semestru liczone od ``semester_start``.
+    """
+    if isinstance(day, str):
+        try:
+            day = date.fromisoformat(day)
+        except ValueError:
+            return None
+    if not isinstance(day, date):
+        return None
+    week = (day - semester_monday(semester_start)).days // 7 + 1
+    return week if week >= 1 else None
+
+
+def entries_meet(
+    e1: "TimetableEntry", e2: "TimetableEntry", semester_start: str | None
+) -> bool:
+    """Czy dwa wpisy rozkładu mogą wystąpić w tym samym tygodniu (kolizja).
+
+    Wpisy datowane (pole ``date`` — „zajęcia w cyklu nieregularnym”) to
+    wydarzenia jednorazowe: wpis datowany koliduje wyłącznie z wpisem
+    w tej samej dacie albo z wpisem cyklicznym dokładnie w tygodniu,
+    w którym wypada jego data. Lustrzana logika: ``entriesMeet`` w app.js.
+    """
+    if e1.date or e2.date:
+        if e1.date and e2.date:
+            return e1.date == e2.date
+        dated, cyclic = (e1, e2) if e1.date else (e2, e1)
+        week = week_of_date(dated.date, semester_start)
+        return week is not None and cycle_matches(cyclic.cycle, week)
+    return cycles_overlap(e1.cycle, e2.cycle)
+
+
 @dataclass
 class TimetableEntry:
-    """Pojedynczy wpis rozkładu zajęć (week_table.html)."""
+    """Pojedynczy wpis rozkładu zajęć (tabela qlplan — produkt scrapingu).
+
+    Wpis „w cyklu nieregularnym” (datatab_2 na qlplan) ma zamiast cyklu
+    konkretną datę: ``date`` (YYYY-MM-DD) i jest wydarzeniem jednorazowym —
+    ``day`` wynika wtedy z daty, a ``cycle`` nie obowiązuje.
+    """
 
     zid: int | None
     day: int  # 0 = poniedziałek, ..., 6 = niedziela
@@ -64,6 +121,7 @@ class TimetableEntry:
     kind: str
     group: str | None
     teacher: str
+    date: str | None = None  # wpis datowany (cykl nieregularny), YYYY-MM-DD
 
     def to_dict(self) -> dict:
         return {
@@ -75,6 +133,7 @@ class TimetableEntry:
             "online": self.online,
             "hybrid": self.hybrid,
             "teacher": self.teacher,
+            "date": self.date,
         }
 
 
@@ -99,6 +158,12 @@ class Offering:
     @property
     def label(self) -> str:
         return self.group or self.kind
+
+    @property
+    def ects(self) -> int:
+        """Punkty ECTS z zapisu 'Z/3' / 'Zbo/10' (część po ukośniku)."""
+        tail = (self.points or "").split("/")[-1].strip()
+        return int(tail) if tail.isdigit() else 0
 
     def to_dict(self) -> dict:
         return {
@@ -151,9 +216,10 @@ class Category:
     """Kategoria z planu studiów.
 
     Tryby:
-      "all"   - wszystkie kursy wymagane (obligatoryjne; wybrana kategoria w serii)
-      "exact" - dokładnie `required` kursów do wyboru (zwykła kategoria do wyboru)
-      "free"  - bez ograniczeń liczby (np. zajęcia spoza planu studiów)
+      "all"        - wszystkie kursy wymagane (obligatoryjne; wybrana kategoria w serii)
+      "exact"      - dokładnie `required` kursów do wyboru (zwykła kategoria do wyboru)
+      "hours_ects" - dokładnie `required_hours` godzin i `required_points` pkt. ECTS
+      "free"       - bez ograniczeń liczby (sekcja bez notki; zajęcia spoza planu)
     """
 
     id: str
@@ -161,7 +227,9 @@ class Category:
     series: str | None = None  # nazwa serii, jeśli kategoria należy do serii
     mode: str = "exact"
     required: int | None = None
-    note: str | None = None  # np. "do wyboru 2 przedmioty"
+    required_hours: int | None = None  # tryb "hours_ects": dokładnie N godzin
+    required_points: int | None = None  # tryb "hours_ects": dokładnie N pkt. ECTS
+    note: str | None = None  # np. "do wyboru 2 przedmioty", "należy wybrać 120 godz., 12 pkt. ECTS"
     courses: list[Course] = field(default_factory=list)
 
     @property
@@ -175,6 +243,8 @@ class Category:
             "series": self.series,
             "mode": self.mode,
             "required": self.required,
+            "required_hours": self.required_hours,
+            "required_points": self.required_points,
             "note": self.note,
             "obligatory": self.is_obligatory,
             "courses": [c.to_dict() for c in self.courses],

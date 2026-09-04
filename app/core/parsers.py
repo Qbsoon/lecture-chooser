@@ -11,6 +11,8 @@ Konwencje tabel (wspólne):
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
+from datetime import date
 from urllib.parse import parse_qs, urlparse
 
 from bs4 import BeautifulSoup
@@ -31,6 +33,82 @@ _KIND_GROUP_RE = re.compile(r"^(?P<kind>.+?)\s*-\s*Grupa[:\s]*(?P<group>.+?)\s*$
 _PAREN_RE = re.compile(r"\(([^)]*)\)")
 _TIME_RE = re.compile(r"(\d{1,2}):(\d{2})")
 _AMOUNT_RE = re.compile(r"do wyboru\s+(\d+)")
+_NOTE_SERIES_RE = re.compile(r"do wyboru\s+(\d+)\s+specjalnoś", re.IGNORECASE)
+_NOTE_CONTINUE_RE = re.compile(r"należy\s+kontynuować", re.IGNORECASE)
+_NOTE_COURSES_RE = re.compile(r"należy\s+wybrać\s+(\d+)\s+przedmiot", re.IGNORECASE)
+_NOTE_HOURS_RE = re.compile(r"(\d+)\s+godz", re.IGNORECASE)
+_NOTE_ECTS_RE = re.compile(r"(\d+)\s+pkt", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class NoteSpec:
+    """Sparsowana notka ograniczenia z wiersza pod nagłówkiem sekcji planu."""
+
+    courses: int | None = None  # dokładnie N przedmiotów
+    hours: int | None = None  # dokładnie N godzin
+    points: int | None = None  # dokładnie N pkt. ECTS
+    series_amount: int | None = None  # notka serii: wybierz N specjalności
+    continue_: bool = False  # "należy kontynuować" -> dokładnie 1 przedmiot
+
+
+def parse_note(text: str | None) -> NoteSpec | None:
+    """Rozpoznaje notki ograniczeń z tabel planu (jedyna ich logika; krok 3).
+
+    Obsługiwane warianty (w kolejności dopasowania):
+      'do wyboru 1 specjalność'                     -> seria: series_amount=1
+      'należy kontynuować wybrane seminarium'       -> continue_=True (dokładnie 1)
+      'należy wybrać 2 przedmioty'                  -> courses=2
+      'należy wybrać 120 godz., 12 pkt. ECTS'       -> hours=120, points=12
+      'do wyboru N ...' (wariant stary, Informatyka) -> courses=N
+    Zwykły nagłówek sekcji (bez wzorca) -> None.
+    """
+    if not text:
+        return None
+    m = _NOTE_SERIES_RE.search(text)
+    if m:
+        return NoteSpec(series_amount=int(m.group(1)))
+    if _NOTE_CONTINUE_RE.search(text):
+        return NoteSpec(continue_=True)
+    m = _NOTE_COURSES_RE.search(text)
+    if m:
+        return NoteSpec(courses=int(m.group(1)))
+    m = _NOTE_HOURS_RE.search(text)
+    if m:
+        ects = _NOTE_ECTS_RE.search(text)
+        return NoteSpec(hours=int(m.group(1)), points=int(ects.group(1)) if ects else None)
+    m = _AMOUNT_RE.search(text)
+    if m:
+        return NoteSpec(courses=int(m.group(1)))
+    return None
+
+
+def _apply_note(
+    note: NoteSpec,
+    head: str,
+    current_cat: Category | None,
+    current_series: Series | None,
+) -> None:
+    """Nakłada sparsowaną notkę na bieżącą serię lub kategorię (w miejscu)."""
+    if current_series is not None:
+        current_series.note = head
+        if note.series_amount is not None:
+            current_series.required = note.series_amount
+        return
+    # Notka po nagłówku zwykłej kategorii; kategorie obligatoryjne i w serii
+    # nie mają licznika przedmiotów.
+    if current_cat is None or current_cat.is_obligatory or current_cat.series:
+        return
+    current_cat.note = head
+    if note.continue_:
+        current_cat.mode = "exact"
+        current_cat.required = 1
+    elif note.hours is not None or note.points is not None:
+        current_cat.mode = "hours_ects"
+        current_cat.required_hours = note.hours
+        current_cat.required_points = note.points
+    elif note.courses is not None:
+        current_cat.mode = "exact"
+        current_cat.required = note.courses
 
 
 def _clean(text: str | None) -> str:
@@ -62,6 +140,24 @@ def _table(html: str) -> BeautifulSoup | None:
     return soup.select_one("table.tabelka") or soup.select_one("table")
 
 
+_DATATAB_ID_RE = re.compile(r"^datatab_\d+$")
+_DATE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})$")
+
+
+def _week_tables(html: str) -> list:
+    """Tabele rozkładu w kolejności występowania (datatab_1, datatab_2, ...).
+
+    Pełna strona qlplan ma też tabelę-legendę kodów cyklu — wybieramy
+    wyłącznie tabele ``datatab_N``. Gdy plik ich nie ma (wycięte fragmenty,
+    fixtures), bierzemy wszystkie tabelki (zachowanie wsteczne).
+    """
+    soup = BeautifulSoup(html, "lxml")
+    tables = soup.find_all("table", id=_DATATAB_ID_RE)
+    if not tables:
+        tables = soup.find_all("table", class_="tabelka") or soup.find_all("table")
+    return tables
+
+
 def _split_kind(kind_raw: str) -> tuple[str, str | None]:
     """'laboratorium - Grupa: 1' -> ('laboratorium', 'Grupa 1'); 'wykład' -> ('wykład', None)."""
     kind_raw = _clean(kind_raw)
@@ -90,7 +186,11 @@ def parse_plan_table(html: str) -> tuple[list[Category], list[Series]]:
       'Przedmioty obligatoryjne'                                  -> kategoria obligatoryjna
       'Przedmioty do wyboru' + 'Nazwa kategorii'                   -> kategoria do wyboru
       'Nazwa serii' + 'Specjalność: Nazwa'                         -> kategoria w serii
-      'do wyboru ...'                                              -> notka bieżącej sekcji/serii
+      dowolny inny nagłówek (np. 'Przedmioty do wyboru (C)')       -> kategoria ("free")
+      notka ograniczenia (patrz parse_note)                        -> limit bieżącej sekcji/serii
+
+    Ograniczenia (tryby i limity kategorii/serii) wynikają wyłącznie z notek
+    w tabeli — ustawienia w settings.json ich już nie nadpisują.
     """
     table = _table(html)
     if table is None:
@@ -112,6 +212,14 @@ def parse_plan_table(html: str) -> tuple[list[Category], list[Series]]:
             if not lines:
                 continue
             head = lines[0]
+
+            # Najpierw notki ograniczeń — dotyczą bieżącej sekcji/serii,
+            # nie tworzą nowej kategorii.
+            note = parse_note(head)
+            if note is not None:
+                _apply_note(note, head, current_cat, current_series)
+                continue
+
             spec_line = next((ln for ln in lines if ln.startswith("Specjalność:")), None)
             if spec_line:
                 series_name = head
@@ -132,15 +240,18 @@ def parse_plan_table(html: str) -> tuple[list[Category], list[Series]]:
                 current_series = None
                 current_cat = Category(id="obligatory", name="Przedmioty obowiązkowe", mode="all")
                 categories.append(current_cat)
-            elif head.startswith("Przedmioty do wyboru") and len(lines) > 1:
+            else:
+                # Zwykła kategoria do wyboru — także nagłówek jednowierszowy
+                # (np. 'Przedmioty do wyboru (C)', 'Seminaria do wyboru').
+                # Sekcja bez notki zostaje bez ograniczeń liczby (tryb "free").
+                name = (
+                    lines[1]
+                    if head.startswith("Przedmioty do wyboru") and len(lines) > 1
+                    else head
+                )
                 current_series = None
-                current_cat = Category(id=_slug(lines[1]), name=lines[1], mode="exact")
+                current_cat = Category(id=_slug(name), name=name, mode="free")
                 categories.append(current_cat)
-            elif head.startswith("do wyboru"):
-                if current_series is not None:
-                    current_series.note = head
-                elif current_cat is not None:
-                    current_cat.note = head
             continue
 
         if _is_header_row(tr) or current_cat is None or len(tds) < 5:
@@ -188,72 +299,107 @@ def parse_plan_table(html: str) -> tuple[list[Category], list[Series]]:
 
 
 def parse_week_table(html: str) -> list[TimetableEntry]:
-    """Parsuje rozkład zajęć -> lista wpisów (dzień, godziny, cykl, sala...)."""
-    table = _table(html)
-    if table is None:
+    """Parsuje rozkład zajęć -> lista wpisów (dzień, godziny, cykl, sala...).
+
+    Uwzględniane są **wszystkie** tabele rozkładu:
+
+    * ``datatab_1`` — zajęcia cykliczne: Sala / Godz.od-do / Cykl /
+      Przedmiot / Prowadzący;
+    * ``datatab_2`` — „zajęcia w cyklu nieregularnym”: zamiast kolumny
+      Cykl pierwsza kolumna to konkretna **Data** (YYYY-MM-DD). Taki wpis
+      dostaje ``date`` (wydarzenie jednorazowe), a dzień tygodnia wynika
+      z daty.
+
+    Wiersz rozpoznajemy jako datowany po dacie ISO w pierwszej komórce
+    (komórka sali nigdy nie wygląda jak data — rozróżnienie jest jednoznaczne
+    niezależnie od nagłówków kolumn).
+    """
+    tables = _week_tables(html)
+    if not tables:
         raise ValueError("Nie znaleziono tabeli rozkładu zajęć (table.tabelka)")
 
     entries: list[TimetableEntry] = []
-    day: int | None = None
 
-    for tr in table.find_all("tr"):
-        tds = tr.find_all("td")
+    for table in tables:
+        day: int | None = None
+        for tr in table.find_all("tr"):
+            tds = tr.find_all("td")
 
-        if _is_header_row(tr) and len(tds) == 1:
-            head = (_header_lines(tds[0]) or [""])[0].upper()
-            for name, idx in DAY_NAMES.items():
-                if head.startswith(name):
-                    day = idx
-                    break
-            continue
+            if _is_header_row(tr) and len(tds) == 1:
+                head = (_header_lines(tds[0]) or [""])[0].upper()
+                for name, idx in DAY_NAMES.items():
+                    if head.startswith(name):
+                        day = idx
+                        break
+                continue
 
-        if _is_header_row(tr) or day is None or len(tds) < 5:
-            continue
+            if _is_header_row(tr) or len(tds) < 5:
+                continue
 
-        # Sala / ONLINE
-        room_cell = tds[0]
-        online = room_cell.find("span", class_="online") is not None
-        room = None
-        if not online:
-            room_link = room_cell.find("a")
-            room = (_text(room_link) if room_link else _text(room_cell)) or None
+            dated = _DATE_RE.match(_text(tds[0]))
+            if dated is None and day is None:
+                continue  # wiersz cykliczny bez nagłówka dnia — jak dotychczas
 
-        # Godziny "08:20 - 09:10"
-        times = _TIME_RE.findall(_text(tds[1]))
-        if len(times) < 2:
-            continue
-        start = int(times[0][0]) * 60 + int(times[0][1])
-        end = int(times[1][0]) * 60 + int(times[1][1])
+            if dated is not None:
+                # wpis datowany: Data / Sala / Godz. / Przedmiot / Prowadzący
+                room_cell, times_cell, subject_cell, teacher_cell = (
+                    tds[1], tds[2], tds[3], tds[4],
+                )
+                entry_date = dated.group(1)
+                try:
+                    entry_day = date.fromisoformat(entry_date).weekday()
+                except ValueError:
+                    continue  # nieprawidłowa data — wpis do odrzucenia
+                cycle = "T"  # cykl nie obowiązuje — decyduje konkretna data
+            else:
+                room_cell, times_cell, subject_cell, teacher_cell = (
+                    tds[0], tds[1], tds[3], tds[4],
+                )
+                entry_date = None
+                entry_day = day
+                cycle = (_text(tds[2]) or "T").upper()
 
-        cycle = (_text(tds[2]) or "T").upper()
+            # Sala / ONLINE
+            online = room_cell.find("span", class_="online") is not None
+            room = None
+            if not online:
+                room_link = room_cell.find("a")
+                room = (_text(room_link) if room_link else _text(room_cell)) or None
 
-        # Przedmiot + typ zajęć + info o hybrydowości
-        subject_cell = tds[3]
-        link = subject_cell.find("a", href=True)
-        zid = _zid_from_href(link.get("href")) if link else None
-        subject = _text(link) if link else _text(subject_cell)
-        kind, group = _kind_from_cell(subject_cell, subject)
-        hybrid = subject_cell.find("span", class_="online") is not None
+            # Godziny "08:20 - 09:10"
+            times = _TIME_RE.findall(_text(times_cell))
+            if len(times) < 2:
+                continue
+            start = int(times[0][0]) * 60 + int(times[0][1])
+            end = int(times[1][0]) * 60 + int(times[1][1])
 
-        teacher_link = tds[4].find("a")
-        teacher = _text(teacher_link) if teacher_link else _text(tds[4])
+            # Przedmiot + typ zajęć + info o hybrydowości
+            link = subject_cell.find("a", href=True)
+            zid = _zid_from_href(link.get("href")) if link else None
+            subject = _text(link) if link else _text(subject_cell)
+            kind, group = _kind_from_cell(subject_cell, subject)
+            hybrid = subject_cell.find("span", class_="online") is not None
 
-        entries.append(
-            TimetableEntry(
-                zid=zid,
-                day=day,
-                start=start,
-                end=end,
-                cycle=cycle,
-                room=room,
-                online=online,
-                hybrid=hybrid,
-                subject=subject,
-                kind=kind,
-                group=group,
-                teacher=teacher,
+            teacher_link = teacher_cell.find("a")
+            teacher = _text(teacher_link) if teacher_link else _text(teacher_cell)
+
+            entries.append(
+                TimetableEntry(
+                    zid=zid,
+                    day=entry_day,
+                    start=start,
+                    end=end,
+                    cycle=cycle,
+                    room=room,
+                    online=online,
+                    hybrid=hybrid,
+                    subject=subject,
+                    kind=kind,
+                    group=group,
+                    teacher=teacher,
+                    date=entry_date,
+                )
             )
-        )
 
     return entries
 
@@ -266,8 +412,6 @@ def _slug(text: str) -> str:
 
 
 def amount_from_note(note: str | None) -> int | None:
-    """Wyciąga liczbę z notki 'do wyboru N ...' (zapasowe źródło ograniczeń)."""
-    if not note:
-        return None
-    m = _AMOUNT_RE.search(note)
-    return int(m.group(1)) if m else None
+    """Liczba przedmiotów z notki 'do wyboru N ...' (wariant stary; kompatybilność)."""
+    spec = parse_note(note)
+    return spec.courses if spec is not None else None

@@ -1,14 +1,22 @@
-"""Testy parserów na rzeczywistych plikach danych."""
+"""Testy parserów na danych ze scrapingu (informatyka II st., 1 semestr)."""
 from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from app.core.parsers import amount_from_note, parse_plan_table, parse_week_table
 
 REPO = Path(__file__).resolve().parents[1]
-DATA = REPO / "app" / "data"
-PLAN_HTML = (DATA / "plan_table.html").read_text(encoding="utf-8")
-WEEK_HTML = (DATA / "week_table.html").read_text(encoding="utf-8")
+DATA = REPO / "app" / "data" / "scraped" / "6089" / "1"
+if not (DATA / "plan.html").is_file() or not (DATA / "week.html").is_file():
+    pytest.skip(
+        "brak danych scraped (kid=6089 etap=1) — uruchom "
+        "`python scripts/scrape.py course --wid 5368 --kid 6089 --save`",
+        allow_module_level=True,
+    )
+PLAN_HTML = (DATA / "plan.html").read_text(encoding="utf-8")
+WEEK_HTML = (DATA / "week.html").read_text(encoding="utf-8")
 
 
 def test_plan_categories_and_series():

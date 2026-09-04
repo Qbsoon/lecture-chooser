@@ -1,8 +1,9 @@
 # lecture_chooser
 
 Interaktywny kreator planu zajęć: kalendarz tygodniowy zbudowany z rozkładu zajęć
-(`week_table.html`) połączony z planem studiów (`plan_table.html`), który dostarcza
+(`week.html`) połączony z planem studiów (`plan.html`), który dostarcza
 podziału na kategorie/serie i ograniczeń wyboru (`settings.json`).
+Dane pochodzą wyłącznie ze scrapingu portalu e-KUL (`scripts/scrape.py`).
 
 ## Stack
 
@@ -19,23 +20,49 @@ quart run                # tryb deweloperski
 hypercorn --bind 0.0.0.0:8000 app:app
 ```
 
-Pliki danych (`plan_table.html`, `week_table.html`, `settings.json`) znajdują się
-w katalogu `app/data/` — to kanoniczne ich położenie. Loader wyszukuje je
-(w tej kolejności): `$DATA_DIR`, `./app/data` — patrz `app/core/source.py`.
+Dane planu i rozkładu pochodzą wyłącznie ze scrapingu e-KUL —
+`python scripts/scrape.py course --wid 5368 --kid 6089 --save` zapisuje tabele
+do `app/data/scraped/{kid}/{etap}/` (`plan.html`, `week.html`, `meta.json`),
+a stan zbierania do `course.json` + `catalog.json`. Pełny zbiór wszystkich
+kierunków zbiera `python scripts/scrape.py bootstrap` (kilka godzin, ~1000
+żądań; pauzy i przerwy co 50 żądań z `settings["scraping"]["bootstrap"]`).
+Przerwany bieg (Ctrl-C) wznawia się od miejsca stopu — kierunki kompletne
+na dysku są pomijane bez żądań; `--wid`/`--kid` ograniczają zbiór.
+Kierunki ignorujące `etap=0` (np. studia podyplomowe) mają fallback:
+plany pobierane per semestr, po 1 żądaniu.
+
+### Usługa odświeżania (worker)
+
+Aplikacja może sama odświeżać dane e-KUL w tle — kolejka FIFO per
+kierunek z limitami z `settings["scraping"]` (dobowy limit żądań,
+limit odświeżeń per kierunek, cooldown, deduplikacja zadań).
+Worker startuje **tylko** przy zmiennych `EKUL_LOGIN`/`EKUL_PASSWORD`
+w środowisku; pusta kolejka nie wysyła żadnych żądań, więc samo
+uruchomienie aplikacji z danymi logowania jest bezpieczne. Stan
+(liczniki dobowe, timestampy ostatniego odświeżenia, zawartość
+kolejki) trwa w `app/data/scraped/state.json` (zapis atomowy;
+reset liczników przy zmianie dnia). Zadania, na które zabrakło
+limitu, zostają w kolejce na kolejny dzień.
+
+Obecnie aplikacja używa informatyki II st., 1 semestru (kid=6089, etap=1). Ustawienia (`settings.json`)
+leżą w katalogu `app/data/`. Loader wyszukuje pliki (w tej kolejności):
+`$DATA_DIR`, `./app/data` — patrz `app/core/source.py`.
 Do własnej lokalizacji służy zmienna `DATA_DIR`.
 
-## Ograniczenia wyboru (`settings.json`)
+## Ograniczenia wyboru (notki w tabeli planu)
 
-```json
-{
-  "constraints_by_categories": [{"key_name": "Zajęcia seminaryjne", "amount": 1}],
-  "constraints_by_series":     [{"key_name": "Przedmioty specjalizacyjne", "amount": 1}]
-}
-```
+Jedynym źródłem ograniczeń są notki w wierszach pod nagłówkami sekcji w tabeli
+planu studiów (`plan.html`), rozpoznawane przez `parse_note`
+(`app/core/parsers.py`):
 
-- `constraints_by_categories` — ile przedmiotów należy wybrać w danej kategorii.
-- `constraints_by_series` — ile kategorii (specjalności) należy wybrać w danej serii.
-- Wartość zapasowa: liczby wypisywane w nagłówkach tabel („do wyboru 2 przedmioty”).
+- „do wyboru 2 przedmioty” / „(należy wybrać 2 przedmioty)” — dokładnie 2 przedmioty,
+- „(należy wybrać 120 godz., 12 pkt. ECTS)” — dokładnie 120 godzin i 12 pkt. ECTS,
+- „(należy kontynuować wybrane seminarium)” — dokładnie 1 przedmiot,
+- „do wyboru 1 specjalność” — notka serii: wybierz 1 specjalność,
+- sekcja bez notki — bez ograniczeń liczby („brak limitu”).
+
+`settings.json` przechowuje już tylko parametry semestru (`semester_start`,
+`semester_weeks`) oraz ustawienia scrapingu (sekcja `scraping`).
 
 ## API
 

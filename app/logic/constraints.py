@@ -1,7 +1,7 @@
-"""Walidacja wyboru przedmiotów względem ograniczeń z planu studiów/settings."""
+"""Walidacja wyboru przedmiotów względem ograniczeń z planu studiów (notki tabel)."""
 from __future__ import annotations
 
-from ..core.models import Category, Course, Dataset, cycles_overlap
+from ..core.models import Category, Course, Dataset, entries_meet
 
 
 def _course_state(course: Course, selected: set[int]) -> tuple[bool, list[tuple[object, list]]]:
@@ -27,6 +27,23 @@ def _check_course_parts(course: Course, per_part, errors: list[str], missing: li
             missing.append(f"„{course.name}”: wybierz grupę zajęć „{part.kind}”")
 
 
+def _category_sums(active: list[Course], selected: set[int]) -> tuple[int, int]:
+    """Sumy (godziny, punkty ECTS) wybranych pozycji kursów kategorii.
+
+    Liczone są wybrane pozycje każdej części; część pojedyncza (bez grup)
+    liczy się w całości dla aktywnego kursu.
+    """
+    hours = points = 0
+    for course in active:
+        for part in course.parts:
+            chosen = [o for o in part.offerings if o.zid in selected]
+            rows = chosen or (part.offerings if len(part.offerings) == 1 else [])
+            for offering in rows:
+                hours += offering.hours
+                points += offering.ects
+    return hours, points
+
+
 def _check_collisions(dataset: Dataset, selected: set[int]) -> list[str]:
     """Ostrzeżenia o kolizjach godzinowych wybranych zajęć."""
     placed = []
@@ -45,7 +62,9 @@ def _check_collisions(dataset: Dataset, selected: set[int]) -> list[str]:
                 break  # posortowane po (dzień, start) - dalsze nie kolidują
             if e1.start >= e2.end:
                 continue
-            if not cycles_overlap(e1.cycle, e2.cycle):
+            if not entries_meet(e1, e2, dataset.semester_start):
+                # wpisy cykliczne muszą mieć wspólny tydzień cyklu; wpisy
+                # datowane („cykl nieregularny”) — wspólną datę/tydzień
                 continue
             warnings.append(
                 f"Kolizja godzinowa: „{_course_name(dataset, o1)}” "
@@ -110,17 +129,45 @@ def evaluate(dataset: Dataset, selected: set[int]) -> dict:
                     f"{category.required - len(active)} "
                     f"{'przedmiot' if category.required - len(active) == 1 else 'przedmioty'}"
                 )
+        elif category.mode == "hours_ects":
+            hours, points = _category_sums(active, selected)
+            if category.required_hours is not None:
+                if hours > category.required_hours:
+                    errors.append(
+                        f"Kategoria „{category.name}”: przekroczono limit godzin "
+                        f"({hours}/{category.required_hours} godz.)"
+                    )
+                elif hours < category.required_hours:
+                    missing.append(
+                        f"Kategoria „{category.name}”: dobierz jeszcze "
+                        f"{category.required_hours - hours} godz. ({hours}/{category.required_hours})"
+                    )
+            if category.required_points is not None:
+                if points > category.required_points:
+                    errors.append(
+                        f"Kategoria „{category.name}”: przekroczono limit punktów ECTS "
+                        f"({points}/{category.required_points} pkt.)"
+                    )
+                elif points < category.required_points:
+                    missing.append(
+                        f"Kategoria „{category.name}”: dobierz jeszcze "
+                        f"{category.required_points - points} pkt. ECTS "
+                        f"({points}/{category.required_points})"
+                    )
 
-        progress.append(
-            {
-                "id": category.id,
-                "name": category.name,
-                "mode": category.mode,
-                "required": category.required,
-                "selected": len(active),
-                "total": len(category.courses),
-            }
-        )
+        entry = {
+            "id": category.id,
+            "name": category.name,
+            "mode": category.mode,
+            "required": category.required,
+            "selected": len(active),
+            "total": len(category.courses),
+        }
+        if category.mode == "hours_ects":
+            entry["hours"], entry["points"] = _category_sums(active, selected)
+            entry["required_hours"] = category.required_hours
+            entry["required_points"] = category.required_points
+        progress.append(entry)
 
     for s in dataset.series:
         cats = [c for c in dataset.categories if c.series == s.name]

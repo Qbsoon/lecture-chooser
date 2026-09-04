@@ -1,11 +1,20 @@
 {
-    "constraints_by_categories": [
-        {"key_name": "Zajęcia seminaryjne", "amount": 1},
-        {"key_name": "Zajęcia monograficzne", "amount": 2}
-    ],
-    "constraints_by_series": [
-        {"key_name": "Przedmioty specjalizacyjne", "amount": 1}
-    ],
     "semester_start": "2026-10-05",
-    "semester_weeks": 15
+    "semester_weeks": 15,
+    "scraping": {
+        "base_url": "https://e.kul.pl",
+        "request_delay": [2.0, 6.0],
+        "batch_size": 25,
+        "batch_pause": 300,
+        "daily_requests": 100,
+        "per_course_daily": 5,
+        "per_course_cooldown_minutes": 15,
+        "weekly_refresh": {"weekday": "sat", "hour": 4},
+        "login_counts_towards_limit": true,
+        "bootstrap": {
+            "request_delay": [1.0, 2.0],
+            "batch_size": 50,
+            "batch_pause": 60
+        }
+    }
 }
