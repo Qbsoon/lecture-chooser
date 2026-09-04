@@ -1,4 +1,3 @@
-# Obraz budowany i hostowany poza tym repozytorium (celowo bez `build`).
 services:
   lecture_chooser:
     image: lecture-chooser:latest
