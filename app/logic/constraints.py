@@ -4,6 +4,38 @@ from __future__ import annotations
 from ..core.models import Category, Course, Dataset, cycles_overlap
 
 
+def implicit_zids(dataset: Dataset, selected: set[int]) -> set[int]:
+    """Zidy wpisane na plan automatycznie, bez żadnego kliknięcia użytkownika.
+
+    Część kursu mająca dokładnie jedną grupę nie ma czego wybierać (brak
+    radia/checkboxa), więc jest na planie zawsze, gdy kurs jest wymagany:
+      - kurs aktywny — wybrano cokolwiek w którejkolwiek jego części,
+      - kategoria trybu "all" aktywna — obowiązkowa (zawsze) albo z serii
+        (po wybraniu pierwszego przedmiotu): wszystkie kursy są wymagane.
+    """
+    auto: set[int] = set()
+    for category in dataset.categories:
+        cat_required = category.mode == "all" and (
+            category.is_obligatory
+            or any(
+                o.zid in selected
+                for course in category.courses
+                for part in course.parts
+                for o in part.offerings
+            )
+        )
+        for course in category.courses:
+            course_chosen = any(
+                o.zid in selected for part in course.parts for o in part.offerings
+            )
+            if not (course_chosen or cat_required):
+                continue
+            for part in course.parts:
+                if len(part.offerings) == 1:
+                    auto.add(part.offerings[0].zid)
+    return auto
+
+
 def _course_state(course: Course, selected: set[int]) -> tuple[bool, list[tuple[object, list]]]:
     """(czy kurs aktywny, [(część, wybrane pozycje)])"""
     per_part = []

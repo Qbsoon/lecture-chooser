@@ -36,7 +36,8 @@ applyTheme(storedTheme());
 /* ---------- stan ---------- */
 
 let dataset = null;          // /api/dataset
-let selected = new Set();    // wybrane zid
+let selected = new Set();    // wybrane zid (tylko jawnie: radio/checkbox)
+let implicit = new Set();    // zidy wpisane na plan automatycznie (części obowiązkowe bez wyboru grup)
 let week = 1;                // ostatnio wybrany konkretny tydzień semestru (zapisywany na serwerze)
 let view = "sum";            // widok kalendarza: "sum" (domyślny) | "A" | "B" | "w1".."w4" (tylko UI)
 let hoverZid = null;          // offering pod kursorem: podświetlenie, gdy wybrany (tylko UI)
@@ -129,6 +130,35 @@ function indexData() {
 }
 
 /* ---------- ocena wyboru (lokalne lustrze logiki serwera) ---------- */
+
+// Lustrzany odbicie serwerowego constraints.implicit_zids: część kursu
+// z dokładnie jedną grupą nie ma żadnego przycisku wyboru, więc jest na
+// planie zawsze, gdy kurs (albo cała kategoria trybu "all" — obowiązkowe,
+// wybrana specjalizacja) jest wymagany. Odświeżane w render().
+function implicitZids() {
+  const auto = new Set();
+  if (!dataset) return auto;
+  for (const cat of dataset.categories) {
+    const catRequired = cat.mode === "all" && (cat.obligatory ||
+      cat.courses.some((c) => c.parts.some((p) => p.offerings.some((o) => selected.has(o.zid)))));
+    for (const course of cat.courses) {
+      const chosen = course.parts.some((p) => p.offerings.some((o) => selected.has(o.zid)));
+      if (!(chosen || catRequired)) continue;
+      for (const p of course.parts) {
+        if (p.offerings.length === 1) auto.add(p.offerings[0].zid);
+      }
+    }
+  }
+  return auto;
+}
+
+// czy offering jest na planie: wybrany jawnie albo wpisany automatycznie
+const isOnPlan = (zid) => selected.has(zid) || implicit.has(zid);
+
+// wszystkie zidy tworzące plan (kalendarz, eksporty, legenda)
+function planZids() {
+  return new Set([...selected, ...implicit]);
+}
 
 function courseState(course) {
   const perPart = course.parts.map((part) => ({
@@ -275,7 +305,7 @@ function setHover(zid) {
 // do wyboru (część z wieloma offeringami), podgląd całego kursu nie ma sensu.
 function coursePreviewZids(course) {
   if (!course.parts.length || course.parts.some((p) => p.offerings.length > 1)) return [];
-  return course.parts.flatMap((p) => p.offerings.map((o) => o.zid).filter((z) => !selected.has(z)));
+  return course.parts.flatMap((p) => p.offerings.map((o) => o.zid).filter((z) => !isOnPlan(z)));
 }
 
 function setHoverCourse(course) {
@@ -470,7 +500,7 @@ function viewMatches(cycle) {
 
 function displayedEntries() {
   const out = [];
-  for (const zid of selected) {
+  for (const zid of planZids()) {
     const info = courseIndex.get(zid);
     if (!info) continue;
     for (const e of info.offering.timetable) {
@@ -482,7 +512,7 @@ function displayedEntries() {
 
 function collidingZids() {
   const placed = [];
-  for (const zid of selected) {
+  for (const zid of planZids()) {
     const info = courseIndex.get(zid);
     if (!info) continue;
     for (const e of info.offering.timetable) placed.push({ e, zid });
@@ -512,7 +542,7 @@ function renderCalendar() {
   // Podgląd offeringów pod kursorem (niewybranych) — te same kafelki co po
   // zaznaczeniu, ale w przygaszonym stylu (klasa .preview).
   for (const zid of hoverZids) {
-    if (selected.has(zid)) continue;
+    if (isOnPlan(zid)) continue;
     const info = courseIndex.get(zid);
     if (!info) continue;
     for (const e of info.offering.timetable) {
@@ -703,10 +733,10 @@ function downloadFile(name, data, mime) {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
-// wszystkie terminy wybranych offeringów (bez filtra widoku kalendarza)
+// wszystkie terminy offeringów na planie (bez filtra widoku kalendarza)
 function selectedEntries() {
   const out = [];
-  for (const zid of selected) {
+  for (const zid of planZids()) {
     const info = courseIndex.get(zid);
     if (!info) continue;
     out.push({ ...info, entries: info.offering.timetable });
@@ -818,7 +848,7 @@ function renderGcalList() {
   list.textContent = "";
   const links = gcalLinks();
   if (!links.length) {
-    list.append(h("div", { class: "gcal-empty", text: selected.size ? "Wybrane zajęcia nie mają terminów w rozkładzie." : "Najpierw wybierz zajęcia." }));
+    list.append(h("div", { class: "gcal-empty", text: planZids().size ? "Zajęcia na planie nie mają terminów w rozkładzie." : "Najpierw wybierz zajęcia." }));
     return;
   }
   list.append(h("div", { class: "gcal-note", text: "Każdy link otwiera formularz nowego wydarzenia w Twoim kalendarzu Google:" }));
@@ -1125,7 +1155,7 @@ async function exportPDFFromServer() {
   // zaznaczalny tekst, ostrość w każdym zoomie, mały plik). Gdy serwer nie ma
   // Playwrighta/Chromium — spadamy na wersję generowaną w przeglądarce.
   const params = new URLSearchParams({ view });
-  const z = [...selected].join(",");
+  const z = [...planZids()].join(",");
   if (z) params.set("z", z);
   try {
     const res = await fetch(`/api/selection.pdf?${params}`);
@@ -1144,7 +1174,7 @@ function shareURL() {
   // Link do aktualnego planu: wybór (?z=) + widok. Bez cookies — odbiorca
   // widzi plan, ale jego własny zapisany wybór pozostaje nietknięty.
   const params = new URLSearchParams({ view });
-  const z = [...selected].join(",");
+  const z = [...planZids()].join(",");
   if (z) params.set("z", z);
   return `${location.origin}${location.pathname}?${params}`;
 }
@@ -1169,7 +1199,7 @@ function copyText(text) {
 }
 
 async function sharePlan() {
-  if (!selected.size) {
+  if (!planZids().size) {
     toast("Najpierw wybierz zajęcia — inaczej link prowadzi do pustego planu.");
     return;
   }
@@ -1247,11 +1277,11 @@ function buildPdf(jpeg, imgW, imgH) {
 function renderPrintHead() {
   const head = $("printHead");
   if (!head) return;
-  // legenda: kategorie z wybranymi zajęciami
+  // legenda: kategorie z zajęciami na planie (wybrane + wpisane automatycznie)
   const used = [];
   const seen = new Set();
   if (dataset) {
-    for (const zid of selected) {
+    for (const zid of planZids()) {
       const info = courseIndex.get(zid);
       if (info && !seen.has(info.category.id)) { seen.add(info.category.id); used.push(info.category); }
     }
@@ -1294,7 +1324,7 @@ function initDownloadMenu() {
   if (!menu) return;
   const actions = {
     ics: () => {
-      const z = [...selected].join(",");
+      const z = [...planZids()].join(",");
       window.location.assign("/api/selection.ics" + (z ? `?z=${encodeURIComponent(z)}` : ""));
     },
     pdf: exportPDFFromServer,
@@ -1332,6 +1362,7 @@ function initDownloadMenu() {
 /* ---------- render i zapis ---------- */
 
 function render() {
+  implicit = implicitZids(); // zajęcia obowiązkowe bez wyboru grup — zawsze na planie
   renderPicker();
   renderCalendar();
   renderWeekSwitch();

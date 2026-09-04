@@ -119,6 +119,26 @@ def test_put_ignores_unknown_zids():
     run(scenario())
 
 
+def test_implicit_obligatory_in_ics_export():
+    """Eksport .ics bez żadnego wyboru obejmuje obowiązkowe zajęcia
+    wpisane na plan automatycznie (bez wyboru grup)."""
+    from app.logic.constraints import implicit_zids
+
+    app = _app()
+    implicit = implicit_zids(app.dataset, set())
+    assert implicit  # w danych są przedmioty obowiązkowe bez wyboru grup
+
+    async def scenario():
+        async with app.test_client() as client:
+            # .ics bez wyboru (ani ?z=, ani ciasteczko) ma obowiązkowe zajęcia
+            res = await client.get("/api/selection.ics")
+            assert res.status_code == 200
+            body = (await res.get_data()).decode()
+            assert body.count("BEGIN:VEVENT") > 0
+
+    run(scenario())
+
+
 def test_selection_pdf_ok():
     """Endpoint PDF z działającym (zamockowanym) rendererem serwerowym."""
     app = _app()

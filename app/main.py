@@ -5,7 +5,7 @@ import os
 
 from quart import Blueprint, Response, current_app, jsonify, render_template, request
 
-from .logic.constraints import evaluate
+from .logic.constraints import evaluate, implicit_zids
 from .logic.ics import build_ics
 from .logic.selection import (
     COOKIE_MAX_AGE,
@@ -45,7 +45,12 @@ def _selection_payload(selected: list[int], week: int) -> dict:
 
 def _zids_from_request() -> set[int]:
     """Zidy z parametru ``z`` (lista po przecinku; przydatne przy
-    udostępnianiu linkiem — bez cookies); bez ``z`` — wybór z ciasteczka."""
+    udostępnianiu linkiem — bez cookies); bez ``z`` — wybór z ciasteczka.
+
+    Do wyniku dokładamy zidy implicit (zajęcia obowiązkowe bez wyboru
+    grup), żeby eksport .ics/PDF obejmował cały plan, nie tylko kliknięte
+    radio. Operacja jest idempotentna — nadmiarowe zidy nic nie psują.
+    """
     ds = current_app.dataset
     raw_z = request.args.get("z", "")
     if raw_z:
@@ -57,9 +62,10 @@ def _zids_from_request() -> set[int]:
                 continue
             if zid in ds.offerings:
                 zids.add(zid)
-        return zids
-    selected, _week = _read_selection()
-    return set(selected)
+    else:
+        selected, _week = _read_selection()
+        zids = set(selected)
+    return zids | implicit_zids(ds, zids)
 
 
 @bp.route("/api/selection", methods=["GET"])

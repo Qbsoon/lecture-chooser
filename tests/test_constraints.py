@@ -4,8 +4,16 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.core.dataset import build_dataset
+from app.core.models import (
+    Category,
+    Course,
+    Dataset,
+    Offering,
+    Part,
+    Series,
+)
 from app.core.source import FileDataLoader
-from app.logic.constraints import evaluate
+from app.logic.constraints import evaluate, implicit_zids
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -99,3 +107,102 @@ def test_time_collision_is_warning():
     status = evaluate(ds, {765361, 758196})
     assert status["ok"] is True
     assert any("Kolizja" in w for w in status["warnings"])
+
+
+# ---------- zajęcia wpisane na plan automatycznie (implicit) ----------
+
+
+def _offering(zid, kind, group=None):
+    return Offering(zid=zid, kind=kind, group=group, points="Z/3", hours=30, teachers=[])
+
+
+def _mini_dataset() -> Dataset:
+    """Syntetyczny plan: obowiązkowe (mieszany + bez wyboru), do wyboru,
+    specjalizacja w serii."""
+    mixed = Course(id="mixed", name="Kurs mieszany", parts=[
+        Part(kind="wykład", offerings=[_offering(1, "wykład")]),
+        Part(kind="ćwiczenia", offerings=[
+            _offering(2, "ćwiczenia", "Grupa 1"), _offering(3, "ćwiczenia", "Grupa 2"),
+        ]),
+    ])
+    fixed = Course(id="fixed", name="Kurs bez wyboru", parts=[
+        Part(kind="laboratorium", offerings=[_offering(4, "laboratorium")]),
+    ])
+    obligatory = Category(
+        id="obligatory", name="Przedmioty obowiązkowe", mode="all",
+        courses=[mixed, fixed],
+    )
+
+    elective = Course(id="elec", name="Kurs do wyboru", parts=[
+        Part(kind="wykład", offerings=[_offering(5, "wykład")]),
+        Part(kind="ćwiczenia", offerings=[
+            _offering(6, "ćwiczenia", "Grupa 1"), _offering(7, "ćwiczenia", "Grupa 2"),
+        ]),
+    ])
+    optional = Category(
+        id="opt", name="Do wyboru", mode="exact", required=1, courses=[elective]
+    )
+
+    spec = Course(id="spec", name="Specjalizacyjny", parts=[
+        Part(kind="wykład", offerings=[_offering(8, "wykład")]),
+        Part(kind="ćwiczenia", offerings=[
+            _offering(9, "ćwiczenia", "Grupa 1"), _offering(10, "ćwiczenia", "Grupa 2"),
+        ]),
+    ])
+    spec_cat = Category(
+        id="spec-cat", name="Specjalizacja", mode="all", series="Seria", courses=[spec]
+    )
+    series = Series(name="Seria", required=1)
+
+    offerings = {}
+    for course in (mixed, fixed, elective, spec):
+        for part in course.parts:
+            for o in part.offerings:
+                offerings[o.zid] = o
+
+    return Dataset(
+        categories=[obligatory, optional, spec_cat], series=[series],
+        offerings=offerings,
+    )
+
+
+def test_implicit_obligatory_without_any_choice():
+    # przedmiot obowiązkowy, w którym nie ma NIC do wyboru -> cały na planie
+    ds = _mini_dataset()
+    assert implicit_zids(ds, set()) == {1, 4}
+
+
+def test_implicit_single_part_regardless_of_group_radios():
+    # obowiązkowy wykład z 1 grupą jest na planie zawsze — także wtedy,
+    # gdy żadna grupa ćwiczeń (ani żadna inna) nie jest wybrana
+    ds = _mini_dataset()
+    assert implicit_zids(ds, set()) == {1, 4}
+    assert implicit_zids(ds, {2}) == {1, 4}
+    # same grupy ćwiczeń nie są implicit — to wybór użytkownika
+    assert 2 not in implicit_zids(ds, set())
+    assert 3 not in implicit_zids(ds, {2})
+
+
+def test_implicit_elective_only_when_course_active():
+    ds = _mini_dataset()
+    # kurs do wyboru: bez wyboru nic nie jest wpisane...
+    assert 5 not in implicit_zids(ds, set())
+    # ...ale wybranie grupy ćwiczeń wpisuje jego jedyny wykład
+    assert implicit_zids(ds, {6}) == {1, 4, 5}
+
+
+def test_implicit_specialization_after_first_choice():
+    ds = _mini_dataset()
+    # kategoria z serii nieaktywna -> jej kursy nie są wymagane
+    assert 8 not in implicit_zids(ds, set())
+    # pierwszy wybór w specjalizacji aktywuje całą kategorię (tryb "all")
+    assert implicit_zids(ds, {9}) == {1, 4, 8}
+
+
+def test_implicit_on_real_dataset():
+    ds = _dataset()
+    implicit = implicit_zids(ds, set())
+    # przedmioty obowiązkowe bez wyboru grup są na planie od razu
+    assert implicit
+    for zid in implicit:
+        assert ds.offerings[zid].category_id == "obligatory"
