@@ -16,6 +16,31 @@ def _course_state(course: Course, selected: set[int]) -> tuple[bool, list[tuple[
     return active, per_part
 
 
+def implicit_zids(dataset: Dataset, selected: set[int]) -> set[int]:
+    """Zbiór zidów wliczanych na plan bez jawnego wyboru.
+
+    Część pojedyncza (jedyna grupa) przedmiotu obowiązkowego lub aktywnego
+    ląduje na planie automatycznie — nie ma czego wybierać, więc wymaganie
+    kliknięcia tylko zasłaniałoby plan (np. wykład, gdy wybiera się tylko
+    grupę ćwiczeń). Aktywna kategoria trybu „wszystkie wymagane” (np. wybrana
+    specjalność) włącza części pojedyncze wszystkich swoich przedmiotów.
+    Lustro po stronie przeglądarki: implicitZids() w app.js.
+    """
+    out: set[int] = set()
+    for category in dataset.categories:
+        cat_active = category.is_obligatory or (
+            category.mode == "all"
+            and any(_course_state(c, selected)[0] for c in category.courses)
+        )
+        for course in category.courses:
+            if not (cat_active or _course_state(course, selected)[0]):
+                continue
+            for part in course.parts:
+                if len(part.offerings) == 1:
+                    out.add(part.offerings[0].zid)
+    return out
+
+
 def _check_course_parts(course: Course, per_part, errors: list[str], missing: list[str]) -> None:
     """Spójność części aktywnego kursu: dokładnie jedna pozycja na część."""
     for part, chosen in per_part:
@@ -90,6 +115,10 @@ def _find_course(dataset: Dataset, offering):
 def evaluate(dataset: Dataset, selected: set[int]) -> dict:
     """Ocenia wybór względem wszystkich ograniczeń.
 
+    Części pojedyncze przedmiotów obowiązkowych/aktywnych są wliczane na plan
+    automatycznie (patrz: implicit_zids) — oceniany jest pełny plan, nie
+    tylko jawnie kliknięte pozycje.
+
     Zwraca:
       ok       - brak błędów twardych (wybór dopuszczalny do zapisu)
       complete - ok + brak braków (plan kompletny)
@@ -102,22 +131,33 @@ def evaluate(dataset: Dataset, selected: set[int]) -> dict:
     missing: list[str] = []
     progress: list[dict] = []
 
+    # plan = wybór jawny + części pojedyncze wliczone automatycznie
+    effective = selected | implicit_zids(dataset, selected)
+
     for category in dataset.categories:
-        states = {c.id: _course_state(c, selected) for c in category.courses}
+        states = {c.id: _course_state(c, effective) for c in category.courses}
         active = [c for c in category.courses if states[c.id][0]]
         category_active = bool(active) or category.is_obligatory
 
-        for course in active:
-            _, per_part = states[course.id]
-            _check_course_parts(course, per_part, errors, missing)
-
         if category.mode == "all":
+            # „wszystkie przedmioty wymagane”: w aktywnej kategorii część
+            # pojedyncza jest na planie z definicji, a każda część grupowa
+            # wymaga wyboru grupy — sprawdzamy więc każdy przedmiot kategorii
             if category_active:
                 for course in category.courses:
-                    if not states[course.id][0]:
+                    _, per_part = states[course.id]
+                    _check_course_parts(course, per_part, errors, missing)
+                    if not states[course.id][0] and not any(
+                        part.grouped for part, _ in per_part
+                    ):
                         scope = category.series or category.name
                         missing.append(f"[{scope}] wymagany przedmiot „{course.name}”")
-        elif category.mode == "exact" and category.required is not None:
+        else:
+            for course in active:
+                _, per_part = states[course.id]
+                _check_course_parts(course, per_part, errors, missing)
+
+        if category.mode == "exact" and category.required is not None:
             if len(active) > category.required:
                 errors.append(
                     f"Kategoria „{category.name}”: wybrano {len(active)} z dopuszczalnych "
@@ -130,7 +170,7 @@ def evaluate(dataset: Dataset, selected: set[int]) -> dict:
                     f"{'przedmiot' if category.required - len(active) == 1 else 'przedmioty'}"
                 )
         elif category.mode == "hours_ects":
-            hours, points = _category_sums(active, selected)
+            hours, points = _category_sums(active, effective)
             if category.required_hours is not None:
                 if hours > category.required_hours:
                     errors.append(
@@ -164,7 +204,7 @@ def evaluate(dataset: Dataset, selected: set[int]) -> dict:
             "total": len(category.courses),
         }
         if category.mode == "hours_ects":
-            entry["hours"], entry["points"] = _category_sums(active, selected)
+            entry["hours"], entry["points"] = _category_sums(active, effective)
             entry["required_hours"] = category.required_hours
             entry["required_points"] = category.required_points
         progress.append(entry)
@@ -199,7 +239,7 @@ def evaluate(dataset: Dataset, selected: set[int]) -> dict:
             }
         )
 
-    warnings = _check_collisions(dataset, selected)
+    warnings = _check_collisions(dataset, effective)
 
     return {
         "ok": not errors,

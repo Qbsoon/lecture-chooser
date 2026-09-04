@@ -200,3 +200,26 @@ def test_ics_with_z_param():
             assert "BEGIN:VCALENDAR" in body
 
     run(scenario())
+
+
+def test_ics_includes_implicit_mandatory():
+    """.ics bez żadnego wyboru zawiera też obowiązkowe części pojedyncze
+    (implicit_zids) — eksport to pełny plan, nie tylko jawne kliknięcia."""
+    app = _app()
+    from app.logic.constraints import implicit_zids
+
+    with_timetable = [
+        zid for zid in implicit_zids(app.dataset, set())
+        if app.dataset.offerings[zid].timetable
+    ]
+    assert with_timetable
+
+    async def scenario():
+        async with app.test_client() as client:
+            res = await client.get("/api/selection.ics")
+            assert res.status_code == 200
+            body = (await res.get_data()).decode()
+            # UID wydarzenia w build_ics zaczyna się od zid-u
+            assert any(f"{zid}-" in body for zid in with_timetable)
+
+    run(scenario())

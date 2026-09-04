@@ -5,7 +5,7 @@ import os
 
 from quart import Blueprint, Response, current_app, jsonify, render_template, request
 
-from .logic.constraints import evaluate
+from .logic.constraints import evaluate, implicit_zids
 from .logic.ics import build_ics
 from .logic.selection import (
     COOKIE_MAX_AGE,
@@ -15,6 +15,7 @@ from .logic.selection import (
     dumps_selection,
     loads_selection,
 )
+from .scraping.catalog import load_catalog
 
 bp = Blueprint("main", __name__)
 
@@ -26,27 +27,159 @@ async def index() -> str:
 
 @bp.route("/api/dataset")
 async def api_dataset() -> dict:
-    return jsonify(current_app.dataset.to_dict())
+    """Dataset wybranego kierunku/semestru (krok 8).
+
+    ``?kid=&etap=`` przełącza kierunek — i zapamiętuje go w ciasteczku
+    (zachowując wybór zajęć i tydzień). Bez parametrów: kierunek z
+    ciasteczka, w razie czego domyślny (pierwszy dostępny).
+    """
+    cache = current_app.datasets
+    kid = request.args.get("kid", type=int)
+    etap = request.args.get("etap", type=int)
+    course = _resolve_course(kid, etap)
+    if course is None:
+        return jsonify({"error": "Brak danych kierunków (app/data/scraped/)"}), 404
+    ds = cache.get(*course)
+    payload = ds.to_dict()
+    payload["course"] = {"kid": course[0], "etap": course[1]}
+    response = jsonify(payload)
+    if "kid" in request.args and "etap" in request.args:
+        selected, week, _ck_kid, _ck_etap = loads_selection(
+            request.cookies.get(COOKIE_NAME), current_app.config["SECRET_KEY"]
+        )
+        response.set_cookie(
+            COOKIE_NAME,
+            dumps_selection(
+                selected,
+                week,
+                current_app.config["SECRET_KEY"],
+                kid=course[0],
+                etap=course[1],
+            ),
+            max_age=COOKIE_MAX_AGE,
+            httponly=True,
+            samesite="Lax",
+        )
+    return response
+
+
+@bp.route("/api/catalog")
+async def api_catalog() -> dict:
+    """Drzewo wydziały → kierunki (etapy, ostatnie odświeżenie) dla UI.
+
+    ``available_etaps`` mówi, które semestry mają komplet plan+week na
+    dysku (reszta wymaga odświeżenia — POST /api/courses/{kid}/refresh).
+    """
+    cache = current_app.datasets
+    catalog = load_catalog(cache.root)
+    available = {f"{kid}-{etap}" for kid, etap in cache.available()}
+    faculties = []
+    for wid, faculty in sorted(catalog.items(), key=lambda kv: int(kv[0])):
+        courses = []
+        for kid, course in sorted(
+            faculty.get("courses", {}).items(), key=lambda kv: int(kv[0])
+        ):
+            etaps = course.get("etaps", [])
+            courses.append(
+                {
+                    "kid": int(kid),
+                    "name": course.get("name", ""),
+                    "etaps": etaps,
+                    "available_etaps": [
+                        e for e in etaps if f"{kid}-{e}" in available
+                    ],
+                    "last_refreshed": course.get("last_refreshed"),
+                }
+            )
+        faculties.append(
+            {"wid": int(wid), "name": faculty.get("name", ""), "courses": courses}
+        )
+    return jsonify({"faculties": faculties})
+
+
+@bp.route("/api/courses/<int:kid>/refresh", methods=["POST"])
+async def api_refresh_course(kid: int):
+    """Kolejkuje odświeżenie kierunku — worker z app/scraping/queue.py.
+
+    202 (dodano / już w kolejce), 429 (cooldown / limit per kierunek),
+    503 (wyczerpany dzienny limit / usługa wyłączona), 404 (nieznany kid).
+    """
+    queue = getattr(current_app, "refresh_queue", None)
+    if queue is None:
+        return jsonify(
+            {"error": "Usługa odświeżania wyłączona (brak EKUL_LOGIN/EKUL_PASSWORD)"}
+        ), 503
+    cache = current_app.datasets
+    catalog = load_catalog(cache.root)
+    if not any(str(kid) in f.get("courses", {}) for f in catalog.values()):
+        return jsonify({"error": f"Nieznany kierunek (kid={kid})"}), 404
+    _status, code, detail = queue.request_refresh(kid)
+    return jsonify(detail), code
+
+
+def _course_pair(kid: int | None, etap: int | None) -> tuple[int, int] | None:
+    """Para ``(kid, etap)`` — tylko gdy oba podane i dane istnieją na dysku."""
+    if kid is None or etap is None:
+        return None
+    if current_app.datasets.get(kid, etap) is None:
+        return None
+    return int(kid), int(etap)
+
+
+def _resolve_course(
+    kid: int | None = None, etap: int | None = None
+) -> tuple[int, int] | None:
+    """Kierunek/semestr: jawna para → ciasteczko → domyślny (krok 8)."""
+    explicit = _course_pair(kid, etap)
+    if explicit is not None:
+        return explicit
+    _raw, _week, ck_kid, ck_etap = loads_selection(
+        request.cookies.get(COOKIE_NAME), current_app.config["SECRET_KEY"]
+    )
+    from_cookie = _course_pair(ck_kid, ck_etap)
+    if from_cookie is not None:
+        return from_cookie
+    return current_app.datasets.default_course()
+
+
+def _current_dataset():
+    """Dataset aktualnie wybranego kierunku (z resolve: cookie → domyślny)."""
+    course = _resolve_course()
+    if course is None:
+        return None
+    return current_app.datasets.get(*course)
 
 
 def _read_selection() -> tuple[list[int], int]:
-    ds = current_app.dataset
-    raw, week = loads_selection(
+    ds = _current_dataset()
+    if ds is None:
+        return [], MIN_WEEK
+    raw, week, _kid, _etap = loads_selection(
         request.cookies.get(COOKIE_NAME), current_app.config["SECRET_KEY"]
     )
     selected = [z for z in raw if z in ds.offerings]
     return selected, week
 
 
-def _selection_payload(selected: list[int], week: int) -> dict:
-    status = evaluate(current_app.dataset, set(selected))
+def _selection_payload(
+    selected: list[int], week: int, ds=None
+) -> dict:
+    """Payload wyboru; ``ds`` domyślnie = aktualnie wybrany kierunek
+    (PUT przekazuje jawnie dataset z ciała żądania)."""
+    if ds is None:
+        ds = _current_dataset()
+    if ds is None:
+        return {"selected": selected, "week": week, "status": {"ok": True, "errors": []}}
+    status = evaluate(ds, set(selected))
     return {"selected": selected, "week": week, "status": status}
 
 
 def _zids_from_request() -> set[int]:
     """Zidy z parametru ``z`` (lista po przecinku; przydatne przy
     udostępnianiu linkiem — bez cookies); bez ``z`` — wybór z ciasteczka."""
-    ds = current_app.dataset
+    ds = _current_dataset()
+    if ds is None:
+        return set()
     raw_z = request.args.get("z", "")
     if raw_z:
         zids: set[int] = set()
@@ -68,10 +201,22 @@ async def api_get_selection() -> dict:
     return jsonify(_selection_payload(selected, week))
 
 
+def _int_or_none(value) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 @bp.route("/api/selection", methods=["PUT"])
 async def api_put_selection():
     data = await request.get_json(silent=True) or {}
-    ds = current_app.dataset
+    course = _resolve_course(
+        _int_or_none(data.get("kid")), _int_or_none(data.get("etap"))
+    )
+    if course is None:
+        return jsonify({"error": "Brak danych kierunku (app/data/scraped/)"}), 400
+    ds = current_app.datasets.get(*course)
 
     raw = data.get("selected", [])
     if not isinstance(raw, list):
@@ -94,10 +239,16 @@ async def api_put_selection():
         # Wybór narusza limity - odrzucamy zapis i zwracamy szczegóły.
         return jsonify({"status": status}), 409
 
-    response = jsonify(_selection_payload(selected, week))
+    response = jsonify(_selection_payload(selected, week, ds))
     response.set_cookie(
         COOKIE_NAME,
-        dumps_selection(selected, week, current_app.config["SECRET_KEY"]),
+        dumps_selection(
+            selected,
+            week,
+            current_app.config["SECRET_KEY"],
+            kid=course[0],
+            etap=course[1],
+        ),
         max_age=COOKIE_MAX_AGE,
         httponly=True,
         samesite="Lax",
@@ -120,8 +271,13 @@ async def api_selection_ics() -> Response:
     (przydatne przy udostępnianiu linku — bez cookies). Bez ``z`` serwowany
     jest wybór z ciasteczka.
     """
-    ds = current_app.dataset
+    ds = _current_dataset()
+    if ds is None:
+        return jsonify({"error": "Brak danych kierunku (app/data/scraped/)"}), 404
     zids = _zids_from_request()
+    # na plan wliczamy też części pojedyncze przedmiotów obowiązkowych/
+    # aktywnych (bez jawnego wyboru) — eksport ma zawierać pełny plan
+    zids |= implicit_zids(ds, zids)
 
     ics = build_ics(ds, zids)
     return Response(
@@ -143,6 +299,9 @@ async def api_selection_pdf() -> Response | tuple[Response, int]:
     """
     from .logic.pdf import PlaywrightUnavailable, render_pdf
 
+    ds = _current_dataset()
+    if ds is None:
+        return jsonify({"error": "Brak danych kierunku (app/data/scraped/)"}), 404
     zids = _zids_from_request()
     view = request.args.get("view", "sum")
     base_url = os.environ.get("PDF_BASE_URL") or request.host_url

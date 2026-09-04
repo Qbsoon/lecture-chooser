@@ -44,6 +44,24 @@
     <div class="status-chip" id="statusChip" aria-live="polite"></div>
   </header>
 
+  <!-- krok 9: wybór kierunku (wydział → kierunek → semestr) + odświeżanie danych -->
+  <div class="coursebar" id="courseBar" hidden>
+    <label class="cbar-field">
+      <span class="cbar-label">Wydział</span>
+      <select class="cbar-select" id="facultySelect" aria-label="Wydział"></select>
+    </label>
+    <label class="cbar-field">
+      <span class="cbar-label">Kierunek</span>
+      <select class="cbar-select" id="courseSelect" aria-label="Kierunek"></select>
+    </label>
+    <label class="cbar-field">
+      <span class="cbar-label">Semestr</span>
+      <select class="cbar-select" id="etapSelect" aria-label="Semestr"></select>
+    </label>
+    <button class="btn" id="refreshBtn" type="button" title="Pobiera z e-KUL aktualny plan i rozkład tego kierunku (wszystkie jego semestry). Limity: do 100 żądań na dobę, do 5 odświeżeń tego samego kierunku, nie częściej niż co 15 min.">Odśwież</button>
+    <span class="refresh-info" id="refreshInfo" aria-live="polite"></span>
+  </div>
+
   <div id="statusPanel" class="status-panel" hidden></div>
 
   <!-- nagłówek tylko przy wydruku (PDF) -->

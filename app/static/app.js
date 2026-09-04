@@ -36,6 +36,11 @@ applyTheme(storedTheme());
 /* ---------- stan ---------- */
 
 let dataset = null;          // /api/dataset
+let catalog = null;          // /api/catalog — drzewo wydziały → kierunki → semestry
+let course = null;           // {kid, etap} wyświetlanego kierunku (z /api/dataset)
+let picked = null;           // {kid, etap|null} wybór z paska kierunku (może być bez danych na dysku)
+let refreshPending = false;  // kierunek z paska czeka w kolejce odświeżania
+let refreshTimer = null;     // pollowanie /api/catalog po kliknięciu „Odśwież”
 let selected = new Set();    // wybrane zid
 let week = 1;                // ostatnio wybrany konkretny tydzień semestru (zapisywany na serwerze)
 let view = "sum";            // widok kalendarza: "sum" (domyślny) | "A" | "B" | "w1".."w4" (tylko UI)
@@ -169,6 +174,32 @@ function courseState(course) {
   return { active: perPart.some((p) => p.chosen.length > 0), perPart };
 }
 
+// Części pojedyncze (jedyna grupa) przedmiotów obowiązkowych lub aktywnych
+// lądują na planie bez jawnego kliknięcia — lustro implicit_zids() z
+// app/logic/constraints.py. Aktywna kategoria „wszystkie wymagane” (np.
+// wybrana specjalność) włącza je dla wszystkich swoich przedmiotów.
+function implicitZids() {
+  const out = new Set();
+  for (const cat of dataset.categories) {
+    const catActive = cat.obligatory ||
+      (cat.mode === "all" && cat.courses.some((c) => courseState(c).active));
+    for (const course of cat.courses) {
+      if (!(catActive || courseState(course).active)) continue;
+      for (const part of course.parts) {
+        if (part.offerings.length === 1) out.add(part.offerings[0].zid);
+      }
+    }
+  }
+  return out;
+}
+
+// Pełny plan = wybór jawny + części wliczone automatycznie.
+function plannedZids() {
+  const out = new Set(selected);
+  for (const zid of implicitZids()) out.add(zid);
+  return out;
+}
+
 function categoryActive(cat) {
   return cat.courses.some((c) => courseState(c).active);
 }
@@ -190,10 +221,12 @@ function offeringEcts(o) {
 // po stronie serwera; część pojedyncza (bez grup) liczy się w całości.
 function categorySums(cat) {
   let hours = 0, points = 0;
+  const planned = plannedZids();
   for (const course of cat.courses) {
-    if (!courseState(course).active) continue;
+    // kurs na planie = jawnie wybrany albo obowiązkowy z częściami pojedynczymi
+    if (!course.parts.some((p) => p.offerings.some((o) => planned.has(o.zid)))) continue;
     for (const part of course.parts) {
-      const chosen = part.offerings.filter((o) => selected.has(o.zid));
+      const chosen = part.offerings.filter((o) => planned.has(o.zid));
       const rows = chosen.length ? chosen : (part.offerings.length === 1 ? part.offerings : []);
       for (const o of rows) { hours += o.hours; points += offeringEcts(o); }
     }
@@ -204,31 +237,52 @@ function categorySums(cat) {
 function localStatus() {
   const errors = [], missing = [], warnings = [];
   const progress = [];
+  // plan = wybór jawny + części pojedyncze wliczone automatycznie (jak evaluate)
+  const planned = plannedZids();
 
   for (const cat of dataset.categories) {
-    const states = new Map(cat.courses.map((c) => [c.id, courseState(c)]));
+    // stan kursów względem planu (nie jawnego wyboru)
+    const states = new Map(cat.courses.map((c) => {
+      const perPart = c.parts.map((part) => ({
+        part,
+        chosen: part.offerings.filter((o) => planned.has(o.zid)),
+      }));
+      return [c.id, { active: perPart.some((p) => p.chosen.length > 0), perPart }];
+    }));
     const active = cat.courses.filter((c) => states.get(c.id).active);
     const catActive = active.length > 0 || cat.obligatory;
 
-    for (const course of active) {
-      for (const { part, chosen } of states.get(course.id).perPart) {
-        if (chosen.length > 1) {
-          errors.push(`„${course.name}”: w części „${part.kind}” wybrano więcej niż jedną grupę`);
-        } else if (chosen.length === 0 && part.offerings.length > 1) {
-          missing.push(`„${course.name}”: wybierz grupę zajęć „${part.kind}”`);
-        }
-      }
-    }
-
     if (cat.mode === "all") {
+      // „wszystkie przedmioty wymagane”: część pojedyncza jest na planie z
+      // definicji, część grupowa wymaga grupy — sprawdzamy każdy przedmiot
       if (catActive) {
         for (const c of cat.courses) {
-          if (!states.get(c.id).active) {
+          const st = states.get(c.id);
+          for (const { part, chosen } of st.perPart) {
+            if (chosen.length > 1) {
+              errors.push(`„${c.name}”: w części „${part.kind}” wybrano więcej niż jedną grupę`);
+            } else if (chosen.length === 0 && part.offerings.length > 1) {
+              missing.push(`„${c.name}”: wybierz grupę zajęć „${part.kind}”`);
+            }
+          }
+          if (!st.active && !st.perPart.some(({ part }) => part.offerings.length > 1)) {
             missing.push(`[${cat.series || cat.name}] wymagany przedmiot „${c.name}”`);
           }
         }
       }
-    } else if (cat.mode === "exact" && cat.required != null) {
+    } else {
+      for (const course of active) {
+        for (const { part, chosen } of states.get(course.id).perPart) {
+          if (chosen.length > 1) {
+            errors.push(`„${course.name}”: w części „${part.kind}” wybrano więcej niż jedną grupę`);
+          } else if (chosen.length === 0 && part.offerings.length > 1) {
+            missing.push(`„${course.name}”: wybierz grupę zajęć „${part.kind}”`);
+          }
+        }
+      }
+    }
+
+    if (cat.mode === "exact" && cat.required != null) {
       if (active.length > cat.required) {
         errors.push(`Kategoria „${cat.name}”: wybrano ${active.length} z dopuszczalnych ${cat.required} przedmiotów`);
       } else if (active.length < cat.required) {
@@ -282,7 +336,7 @@ function localStatus() {
 
   // kolizje godzinowe (we wszystkich tygodniach — jak na serwerze)
   const placed = [];
-  for (const zid of selected) {
+  for (const zid of planned) {
     const info = courseIndex.get(zid);
     if (!info) continue;
     for (const e of info.offering.timetable) placed.push({ e, name: info.course.name });
@@ -347,7 +401,7 @@ function setHover(zid) {
 // do wyboru (część z wieloma offeringami), podgląd całego kursu nie ma sensu.
 function coursePreviewZids(course) {
   if (!course.parts.length || course.parts.some((p) => p.offerings.length > 1)) return [];
-  return course.parts.flatMap((p) => p.offerings.map((o) => o.zid).filter((z) => !selected.has(z)));
+  return course.parts.flatMap((p) => p.offerings.map((o) => o.zid).filter((z) => !plannedZids().has(z)));
 }
 
 function setHoverCourse(course) {
@@ -389,6 +443,12 @@ function renderCourse(cat, course) {
   const state = courseState(course);
   const selectable = courseSelectable(cat);
   const color = catColor.get(cat.id);
+  // kurs na planie = wybór jawny + części pojedyncze wliczone automatycznie
+  const planned = plannedZids();
+  const onPlan = course.parts.some((p) => p.offerings.some((o) => planned.has(o.zid)));
+  const missesGroup = onPlan && course.parts.some(
+    (p) => p.offerings.length > 1 && !p.offerings.some((o) => planned.has(o.zid))
+  );
 
   const header = h("div", {
     class: "course-head",
@@ -402,20 +462,22 @@ function renderCourse(cat, course) {
       "aria-label": course.name,
     }),
     h("span", { class: "name", text: course.name }),
-    state.active && course.parts.some((p) => p.offerings.length > 1 && !p.offerings.some((o) => selected.has(o.zid)))
+    missesGroup
       ? h("span", { class: "course-chip needs", text: "wybierz grupę" })
-      : (state.active ? h("span", { class: "course-chip", text: "wybrany" }) : null),
+      : (onPlan ? h("span", { class: "course-chip", text: state.active ? "wybrany" : "na planie" }) : null),
     h("span", { class: "kinds", text: course.parts.map((p) => p.kind).join(" + ") }),
   );
   header.style.borderLeft = `3px solid ${color}`;
 
   const rows = [];
   for (const part of course.parts) {
+    // chosen/needsGroup względem jawnego wyboru: radio działa tylko w częściach
+    // grupowych, a tam implicit nigdy nic nie dodaje (planned == selected)
     const chosen = part.offerings.filter((o) => selected.has(o.zid));
-    const needsGroup = state.active && chosen.length === 0 && part.offerings.length > 1;
+    const needsGroup = onPlan && chosen.length === 0 && part.offerings.length > 1;
     for (const o of part.offerings) {
       const row = h("label", {
-        class: "offering" + (selected.has(o.zid) ? " on" : "") + (needsGroup ? " needs-group" : ""),
+        class: "offering" + (planned.has(o.zid) ? " on" : "") + (needsGroup ? " needs-group" : ""),
         "data-zid": o.zid,
         onmouseenter: () => setHover(o.zid),
         onmouseleave: () => setHover(null),
@@ -570,7 +632,7 @@ function entryInView(e) {
 
 function displayedEntries() {
   const out = [];
-  for (const zid of selected) {
+  for (const zid of plannedZids()) {
     const info = courseIndex.get(zid);
     if (!info) continue;
     for (const e of info.offering.timetable) {
@@ -582,7 +644,7 @@ function displayedEntries() {
 
 function collidingZids() {
   const placed = [];
-  for (const zid of selected) {
+  for (const zid of plannedZids()) {
     const info = courseIndex.get(zid);
     if (!info) continue;
     for (const e of info.offering.timetable) placed.push({ e, zid });
@@ -608,11 +670,12 @@ function renderCalendar() {
   body.textContent = "";
 
   const entries = displayedEntries();
+  const planned = plannedZids();
 
-  // Podgląd offeringów pod kursorem (niewybranych) — te same kafelki co po
+  // Podgląd offeringów pod kursorem (spoza planu) — te same kafelki co po
   // zaznaczeniu, ale w przygaszonym stylu (klasa .preview).
   for (const zid of hoverZids) {
-    if (selected.has(zid)) continue;
+    if (planned.has(zid)) continue;
     const info = courseIndex.get(zid);
     if (!info) continue;
     for (const e of info.offering.timetable) {
@@ -784,6 +847,249 @@ function toast(msg) {
   toast._timer = setTimeout(() => { t.hidden = true; }, 5000);
 }
 
+/* ---------- pasek kierunku: wydział → kierunek → semestr + „Odśwież” ---------- */
+
+// Wpis kierunku o danym kid w katalogu (+ jego wydział).
+function catalogCourse(kid) {
+  if (!catalog) return null;
+  for (const faculty of catalog.faculties) {
+    const c = faculty.courses.find((x) => x.kid === kid);
+    if (c) return { faculty, course: c };
+  }
+  return null;
+}
+
+// Semestry kierunku z kompletem danych na serwerze (posortowane).
+function availableEtaps(catCourse) {
+  return (catCourse.available_etaps || []).map(Number).sort((a, b) => a - b);
+}
+
+// „2 dni temu” / „właśnie teraz”; starsze niż miesiąc — konkretna data.
+function relTime(iso) {
+  const t = Date.parse(iso);
+  if (isNaN(t)) return null;
+  const min = Math.round((Date.now() - t) / 60000);
+  if (min < 1) return "właśnie teraz";
+  if (min < 60) return `${min} min temu`;
+  const hrs = Math.round(min / 60);
+  if (hrs < 24) return `${hrs} godz. temu`;
+  const days = Math.round(hrs / 24);
+  if (days < 30) return `${days} ${days === 1 ? "dzień" : "dni"} temu`;
+  return new Date(t).toLocaleDateString("pl-PL");
+}
+
+function renderCourseBar() {
+  const bar = $("courseBar");
+  if (!bar || !catalog || !picked) return;
+  const info = catalogCourse(picked.kid);
+  if (!info) { bar.hidden = true; return; }
+  bar.hidden = false;
+
+  const facSel = $("facultySelect"), courseSel = $("courseSelect"), etapSel = $("etapSelect");
+
+  facSel.textContent = "";
+  for (const f of catalog.faculties) {
+    if (!f.courses.length) continue;
+    facSel.append(h("option", { value: f.wid, selected: f.wid === info.faculty.wid, text: f.name }));
+  }
+
+  courseSel.textContent = "";
+  for (const c of info.faculty.courses) {
+    courseSel.append(h("option", { value: c.kid, selected: c.kid === picked.kid, text: c.name }));
+  }
+
+  etapSel.textContent = "";
+  const etaps = (info.course.etaps || []).map(Number).sort((a, b) => a - b);
+  const available = availableEtaps(info.course);
+  if (etaps.length) {
+    for (const e of etaps) {
+      etapSel.append(h("option", {
+        value: e,
+        selected: e === picked.etap,
+        disabled: !available.includes(e),
+        text: `Semestr ${e}` + (available.includes(e) ? "" : " · brak danych"),
+      }));
+    }
+  } else {
+    etapSel.append(h("option", { text: "brak semestrów", disabled: true }));
+  }
+
+  const infoEl = $("refreshInfo");
+  infoEl.textContent = "";
+  infoEl.className = "refresh-info";
+  if (refreshPending) {
+    infoEl.classList.add("pending");
+    infoEl.textContent = "odświeżanie…";
+  } else {
+    const iso = info.course.last_refreshed;
+    const rel = iso ? relTime(iso) : null;
+    if (rel) {
+      infoEl.append(h("span", {
+        text: `odświeżono: ${rel}`,
+        title: new Date(iso).toLocaleString("pl-PL"),
+      }));
+    } else {
+      infoEl.textContent = "nie odświeżano";
+    }
+  }
+}
+
+// Przeładowanie datasetu na inny kierunek/semestr. `?kid=&etap=` ustawia po
+// drodze ciasteczko z kursem — wybór zajęć i tydzień użytkownika przetrwają,
+// a serwer odfiltruje zidy do ofert nowego kierunku (po powrocie na stary
+// kierunek wybór wraca — zidy wciąż siedzą w ciasteczku).
+async function switchCourse(kid, etap) {
+  try {
+    const res = await fetch(`/api/dataset?kid=${kid}&etap=${etap}`);
+    if (!res.ok) throw new Error("dataset");
+    dataset = await res.json();
+    course = dataset.course || null;
+    if (dataset.semester_start) semesterStart = dataset.semester_start;
+    if (dataset.semester_weeks) semesterWeeks = dataset.semester_weeks;
+    indexData();
+    await loadSelection();
+    openBoxes = new Set(); // rozwinięte sekcje listy dotyczyły poprzedniego kierunku
+    view = "sum";
+    picked = { ...course };
+    render();
+    renderCourseBar();
+    history.replaceState(null, "", location.pathname); // ?z=/?view= nie mają już sensu
+  } catch (err) {
+    toast("Nie udało się wczytać danych kierunku.");
+    picked = { ...course };
+    renderCourseBar();
+  }
+}
+
+// Wybór kierunku z selecta: pierwszy semestr z danymi; bez danych — zostajemy
+// na starym widoku, ale pasek (i „Odśwież”) wskazują nowy kierunek.
+function selectCourse(kid) {
+  const info = catalogCourse(kid);
+  if (!info) return;
+  const etap = availableEtaps(info.course)[0] ?? null;
+  picked = { kid, etap };
+  renderCourseBar();
+  if (etap !== null) {
+    switchCourse(kid, etap);
+  } else {
+    toast(`„${info.course.name}” nie ma jeszcze danych — kliknij „Odśwież”, żeby pobrać je z e-KUL.`);
+  }
+}
+
+function onFacultyChange() {
+  const wid = Number($("facultySelect").value);
+  const faculty = catalog.faculties.find((f) => f.wid === wid);
+  if (!faculty || !faculty.courses.length) return;
+  const withData = faculty.courses.find((c) => availableEtaps(c).length);
+  selectCourse((withData || faculty.courses[0]).kid);
+}
+
+function onCourseChange() {
+  selectCourse(Number($("courseSelect").value));
+}
+
+function onEtapChange() {
+  const raw = $("etapSelect").value;
+  if (!/^\d+$/.test(raw)) return;
+  const etap = Number(raw);
+  picked = { kid: picked.kid, etap };
+  renderCourseBar();
+  switchCourse(picked.kid, etap);
+}
+
+async function refreshCourse() {
+  const kid = picked ? picked.kid : (course ? course.kid : null);
+  if (kid == null) return;
+  const btn = $("refreshBtn");
+  btn.disabled = true;
+  try {
+    const res = await fetch(`/api/courses/${kid}/refresh`, { method: "POST" });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 202) {
+      refreshPending = true;
+      toast(data.status === "already_queued"
+        ? "Ten kierunek jest już w kolejce odświeżania."
+        : "Dodano do kolejki odświeżania — nowe dane wczytają się same.");
+      startRefreshPolling();
+    } else if (res.status === 429) {
+      toast(data.retry_after_minutes != null
+        ? `Ten kierunek był przed chwilą odświeżany — spróbuj za ok. ${Math.ceil(data.retry_after_minutes)} min.`
+        : "Dzienny limit odświeżeń tego kierunku (5) wyczerpany — spróbuj jutro.");
+    } else if (res.status === 503) {
+      toast(data.error
+        ? "Usługa odświeżania jest wyłączona na serwerze (brak danych logowania e-KUL)."
+        : "Dzienny limit żądań do e-KUL (100) wyczerpany — odświeżanie będzie możliwe jutro.");
+    } else {
+      toast("Nie udało się zgłosić odświeżania.");
+    }
+  } catch (err) {
+    toast("Brak połączenia z serwerem.");
+  } finally {
+    btn.disabled = false;
+    renderCourseBar();
+  }
+}
+
+function stopRefreshPolling() {
+  if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+}
+
+// Po dodaniu do kolejki pollujemy /api/catalog (~raz na 30 s; to odczyt
+// lokalnego pliku, nie żądanie do e-KUL). Gdy last_refreshed kierunku
+// urośnie — wczytujemy świeży dataset automatycznie.
+function startRefreshPolling() {
+  stopRefreshPolling();
+  const before = picked ? (catalogCourse(picked.kid) || {}).course?.last_refreshed : null;
+  const startedAt = Date.now();
+  refreshTimer = setInterval(async () => {
+    // po 20 min poddajemy się cicho — worker i tak dokończy zadanie
+    if (Date.now() - startedAt > 20 * 60 * 1000) {
+      refreshPending = false;
+      stopRefreshPolling();
+      renderCourseBar();
+      return;
+    }
+    try {
+      const res = await fetch("/api/catalog");
+      if (!res.ok) return;
+      catalog = await res.json();
+      const entry = picked ? catalogCourse(picked.kid) : null;
+      const now = entry ? entry.course.last_refreshed : null;
+      if (now && now !== before) {
+        refreshPending = false;
+        stopRefreshPolling();
+        toast("Odświeżono dane kierunku ✓");
+        const kid = picked.kid;
+        const etap = picked.etap != null
+          ? picked.etap
+          : (entry ? availableEtaps(entry.course)[0] : null);
+        if (etap != null) await switchCourse(kid, etap);
+        else { picked = { kid, etap: null }; renderCourseBar(); }
+      } else {
+        renderCourseBar();
+      }
+    } catch (err) { /* chwilowy błąd sieci — próbujemy dalej */ }
+  }, 30000);
+  renderCourseBar();
+}
+
+async function initCourseBar() {
+  try {
+    const res = await fetch("/api/catalog");
+    if (!res.ok) throw new Error("catalog");
+    catalog = await res.json();
+  } catch (err) {
+    return; // pasek zostaje ukryty — reszta strony działa normalnie
+  }
+  if (!course || !catalogCourse(course.kid)) return;
+  picked = { ...course };
+  renderCourseBar();
+  $("facultySelect").addEventListener("change", onFacultyChange);
+  $("courseSelect").addEventListener("change", onCourseChange);
+  $("etapSelect").addEventListener("change", onEtapChange);
+  $("refreshBtn").addEventListener("click", refreshCourse);
+}
+
 /* ---------- eksporty (menu „Pobierz”) ---------- */
 
 function viewLabel() {
@@ -803,10 +1109,11 @@ function downloadFile(name, data, mime) {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
-// wszystkie terminy wybranych offeringów (bez filtra widoku kalendarza)
+// wszystkie terminy zajęć na planie (wybór jawny + części wliczone
+// automatycznie; bez filtra widoku kalendarza)
 function selectedEntries() {
   const out = [];
-  for (const zid of selected) {
+  for (const zid of plannedZids()) {
     const info = courseIndex.get(zid);
     if (!info) continue;
     out.push({ ...info, entries: info.offering.timetable });
@@ -942,7 +1249,7 @@ function renderGcalList() {
   list.textContent = "";
   const links = gcalLinks();
   if (!links.length) {
-    list.append(h("div", { class: "gcal-empty", text: selected.size ? "Wybrane zajęcia nie mają terminów w rozkładzie." : "Najpierw wybierz zajęcia." }));
+    list.append(h("div", { class: "gcal-empty", text: plannedZids().size ? "Zajęcia na planie nie mają terminów w rozkładzie." : "Najpierw wybierz zajęcia." }));
     return;
   }
   list.append(h("div", { class: "gcal-note", text: "Każdy link otwiera formularz nowego wydarzenia w Twoim kalendarzu Google:" }));
@@ -1294,7 +1601,9 @@ function copyText(text) {
 }
 
 async function sharePlan() {
-  if (!selected.size) {
+  // plan obowiązkowy (części pojedyncze wliczone automatycznie) też jest
+  // wart udostępnienia — nie blokujemy pustego jawnego wyboru
+  if (!plannedZids().size) {
     toast("Najpierw wybierz zajęcia — inaczej link prowadzi do pustego planu.");
     return;
   }
@@ -1376,7 +1685,7 @@ function renderPrintHead() {
   const used = [];
   const seen = new Set();
   if (dataset) {
-    for (const zid of selected) {
+    for (const zid of plannedZids()) {
       const info = courseIndex.get(zid);
       if (info && !seen.has(info.category.id)) { seen.add(info.category.id); used.push(info.category); }
     }
@@ -1479,7 +1788,7 @@ async function save() {
     const res = await fetch("/api/selection", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ selected: [...selected], week }),
+      body: JSON.stringify({ selected: [...selected], week, kid: course?.kid, etap: course?.etap }),
     });
     const data = await res.json();
     if (res.status === 409) {
@@ -1515,6 +1824,7 @@ async function init() {
     const res = await fetch("/api/dataset");
     if (!res.ok) throw new Error("dataset");
     dataset = await res.json();
+    course = dataset.course || null;
   } catch (err) {
     $("picker").append(h("p", { class: "p-note", text: "Nie udało się wczytać danych (plan studiów / rozkład)." }));
     return;
@@ -1547,6 +1857,7 @@ async function init() {
   }
 
   initDownloadMenu();
+  initCourseBar(); // pasek wydział/kierunek/semestr + „Odśwież” (async — nie blokuje UI)
   // Dopasowanie do 1 strony wydruku: beforeprint liczy wymiary jeszcze ze
   // stylami ekranowymi, matchMedia("print") — już po zastosowaniu arkusza
   // druku, więc to jego pomiar jest wiążący.

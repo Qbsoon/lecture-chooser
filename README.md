@@ -44,7 +44,14 @@ kolejki) trwa w `app/data/scraped/state.json` (zapis atomowy;
 reset liczników przy zmianie dnia). Zadania, na które zabrakło
 limitu, zostają w kolejce na kolejny dzień.
 
-Obecnie aplikacja używa informatyki II st., 1 semestru (kid=6089, etap=1). Ustawienia (`settings.json`)
+Wybór kierunku odbywa się w UI — pasek pod nagłówkiem (wydział → kierunek →
+semestr) pobiera `/api/dataset?kid=&etap=` i zapamiętuje kierunek w ciasteczku
+(wybór zajęć i tydzień użytkownika przetrwają; po powrocie na stary kierunek
+wybór wraca). Semestry bez danych na dysku są wyszarzone („· brak danych”).
+Przycisk **„Odśwież”** kolejkuje pobranie całego kierunku z e-KUL (limity jak
+wyżej), a po jego wykonaniu strona sama przeładowuje nowy dataset.
+Domyślnie startuje informatyka II st., semestr 1 (kid=6089, etap=1).
+Ustawienia (`settings.json`)
 leżą w katalogu `app/data/`. Loader wyszukuje pliki (w tej kolejności):
 `$DATA_DIR`, `./app/data` — patrz `app/core/source.py`.
 Do własnej lokalizacji służy zmienna `DATA_DIR`.
@@ -69,9 +76,11 @@ planu studiów (`plan.html`), rozpoznawane przez `parse_note`
 | metoda | ścieżka | opis |
 |---|---|---|
 | GET | `/` | strona główna (kalendarz + picker) |
-| GET | `/api/dataset` | plan + rozkład + ograniczenia (JSON) |
+| GET | `/api/catalog` | drzewo wydziały → kierunki (etapy, `available_etaps` z danymi na dysku, `last_refreshed`) |
+| GET | `/api/dataset` | plan + rozkład + ograniczenia (JSON); `?kid=&etap=` przełącza kierunek (zapamiętywany w ciasteczku — bez parametrów: ciasteczko → kierunek domyślny) |
+| POST | `/api/courses/<kid>/refresh` | kolejkuje odświeżenie kierunku: 202 dodano/już w kolejce, 429 cooldown/limit per-kierunek (`retry_after_minutes`), 503 dzienny limit lub usługa wyłączona (bez `EKUL_LOGIN`/`EKUL_PASSWORD`), 404 nieznany kierunek |
 | GET | `/api/selection` | aktualny wybór z ciasteczka + status walidacji |
-| PUT | `/api/selection` | zapis wyboru `{selected: [zid], week: 1..4}` (ustawia ciasteczko); 409 przy wyborze naruszającym limity |
+| PUT | `/api/selection` | zapis wyboru `{selected: [zid], week: 1..4, kid?, etap?}` (ustawia ciasteczko); 409 przy wyborze naruszającym limity |
 | DELETE | `/api/selection` | wyczyszczenie wyboru i ciasteczka |
 | GET | `/api/selection.ics` | kalendarz iCalendar (parametr `z` — wybór z linku, bez cookies) |
 | GET | `/api/selection.pdf` | **wektorowy** PDF planu (`z`, `view=sum\|A\|B\|w1..w4`); 503, gdy serwer nie ma Playwright/Chromium — wtedy strona sama generuje PDF w przeglądarce |

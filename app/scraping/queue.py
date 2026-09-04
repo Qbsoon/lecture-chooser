@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
+from ..core.source import resolve_data_dir
 from .catalog import load_catalog
 from .client import DEFAULT_BASE_URL, EkulClient, LoginError, ScrapingError
 from .scraper import scrape_course
@@ -62,12 +63,14 @@ class RefreshQueue:
         *,
         now: NowFn | None = None,
         sleep: SleepFn = asyncio.sleep,
+        on_refreshed: Callable[[int], None] | None = None,
     ) -> None:
         self.state = state
         self._refresh = refresh
         self.limits = limits
         self._now: NowFn = now or (lambda: datetime.now(timezone.utc))
         self._sleep: SleepFn = sleep
+        self.on_refreshed = on_refreshed  # np. invalidacja cache datasetów
         self._running: set[int] = set()  # kierunki właśnie odświeżane
 
     # -- bramka dla API (krok 8) ----------------------------------------
@@ -139,6 +142,11 @@ class RefreshQueue:
             now = self._now()
             self.state.record_request(used, now)
             self.state.record_refresh(kid, now)
+            if self.on_refreshed is not None:
+                try:
+                    self.on_refreshed(kid)
+                except Exception:  # callback nie może wywrócić workera
+                    logger.exception("on_refreshed(kid=%d) rzucił wyjątek", kid)
             logger.info("kid=%d odświeżony (%d żądań)", kid, used)
             return "done"
         except Exception as exc:  # izolacja błędu pojedynczego zadania
@@ -228,20 +236,8 @@ class EkulRefresher:
             return total + client.request_count - before
 
 
-def resolve_data_dir(data_dir: str | Path | None = None) -> Path:
-    """Katalog danych — te same reguły co ``FileDataLoader``."""
-    if data_dir is not None:
-        return Path(data_dir)
-    candidates: list[Path] = []
-    env_dir = os.environ.get("DATA_DIR")
-    if env_dir:
-        candidates.append(Path(env_dir))
-    app_dir = Path(__file__).resolve().parents[1]  # katalog pakietu app/
-    candidates.extend([Path("app/data"), app_dir / "data"])
-    for directory in candidates:
-        if directory.is_dir():
-            return directory
-    return app_dir / "data"
+# resolve_data_dir — wspólna implementacja w app/core/source.py
+# (jedna para reguł wyszukiwania katalogu danych dla całej aplikacji).
 
 
 def _scraping_settings(data_dir: Path) -> dict[str, Any]:

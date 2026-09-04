@@ -2,10 +2,16 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from .models import Category, Course, Dataset, Offering, Part
 from .parsers import parse_plan_table, parse_week_table
-from .source import DataLoader
+from .source import (
+    DataLoader,
+    ScrapedDataLoader,
+    list_available_courses,
+    resolve_data_dir,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -107,3 +113,46 @@ def _build_unassigned_category(unassigned: list) -> Category | None:
     )
     category.courses = [g["course"] for g in groups.values()]
     return category
+
+
+class DatasetCache:
+    """Cache datasetów per (kid, etap) — krok 8.
+
+    ``get`` buduje dataset leniwie (i cache'uje); ``invalidate`` wyrzuca
+    wpisy kierunku po udanym odświeżeniu (worker z queue.py), więc kolejne
+    żądanie zbuduje dataset od nowa — już z nowych plików na dysku.
+    """
+
+    #: kierunek startowy aplikacji (informatyka II st., 1 semestr)
+    DEFAULT_COURSE = (6089, 1)
+
+    def __init__(self, data_dir: str | Path | None = None) -> None:
+        self.data_dir = data_dir
+        self.root = resolve_data_dir(data_dir)
+        self._cache: dict[tuple[int, int], Dataset] = {}
+
+    def available(self) -> list[tuple[int, int]]:
+        """(kid, etap) z kompletem plan+week na dysku."""
+        return list_available_courses(self.data_dir)
+
+    def get(self, kid: int, etap: int) -> Dataset | None:
+        key = (int(kid), int(etap))
+        if key in self._cache:
+            return self._cache[key]
+        try:
+            dataset = build_dataset(ScrapedDataLoader(self.data_dir, *key))
+        except FileNotFoundError:
+            return None
+        self._cache[key] = dataset
+        return dataset
+
+    def default_course(self) -> tuple[int, int] | None:
+        available = self.available()
+        if self.DEFAULT_COURSE in available:
+            return self.DEFAULT_COURSE
+        return available[0] if available else None
+
+    def invalidate(self, kid: int) -> None:
+        """Wyrzuca z cache wszystkie semestry kierunku (po odświeżeniu)."""
+        for key in [k for k in self._cache if k[0] == int(kid)]:
+            del self._cache[key]

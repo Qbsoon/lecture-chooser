@@ -251,6 +251,68 @@ html, body {
 .status-chip.warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
 .status-chip.err { background: var(--danger-soft); color: var(--danger); border-color: transparent; }
 
+/* ---------- pasek wyboru kierunku (krok 9) ---------- */
+
+.coursebar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px 14px;
+  padding: 10px 20px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+}
+
+.cbar-field { display: grid; gap: 3px; }
+
+.cbar-label {
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.cbar-select {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  max-width: 320px;
+}
+
+.cbar-select:hover { border-color: var(--accent); }
+
+#refreshBtn:disabled { opacity: 0.6; cursor: wait; }
+
+.refresh-info {
+  font-size: 0.8rem;
+  color: var(--muted);
+  align-self: center;
+  white-space: nowrap;
+}
+
+.refresh-info.pending { color: var(--warn); }
+
+/* krecik „odświeżanie…” */
+.refresh-info.pending::before {
+  content: "";
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 6px;
+  border-radius: 50%;
+  border: 2px solid var(--warn);
+  border-top-color: transparent;
+  animation: cbarspin 0.9s linear infinite;
+  vertical-align: -1px;
+}
+
+@keyframes cbarspin { to { transform: rotate(360deg); } }
+
 /* ---------- panel statusu ---------- */
 
 .status-panel {
@@ -687,7 +749,7 @@ details.dropdown[open] > summary { border-color: var(--accent); background: var(
     --grid-line: #e2e8f0;
   }
 
-  .topbar, #statusPanel, .picker, #toast { display: none !important; }
+  .topbar, #courseBar, #statusPanel, .picker, #toast { display: none !important; }
 
   .layout { display: block; padding: 0; }
 

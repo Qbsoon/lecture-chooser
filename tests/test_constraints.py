@@ -7,7 +7,7 @@ import pytest
 
 from app.core.dataset import build_dataset
 from app.core.source import FileDataLoader
-from app.logic.constraints import evaluate
+from app.logic.constraints import evaluate, implicit_zids
 
 REPO = Path(__file__).resolve().parents[1]
 _SCRAPE_DIR = REPO / "app" / "data" / "scraped" / "6089" / "1"
@@ -108,3 +108,66 @@ def test_time_collision_is_warning():
     status = evaluate(ds, {765362, 758196})
     assert status["ok"] is True
     assert any("Kolizja" in w for w in status["warnings"])
+
+
+def test_implicit_zids_cover_obligatory_singles():
+    """Części pojedyncze przedmiotów obowiązkowych są na planie bez wyboru."""
+    ds = _dataset()
+    obligatory = next(c for c in ds.categories if c.is_obligatory)
+    singles = {
+        o.zid
+        for course in obligatory.courses
+        for part in course.parts
+        if len(part.offerings) == 1
+        for o in part.offerings
+    }
+    assert singles  # w danych są obowiązkowe części bez wybierania grup
+    assert singles <= implicit_zids(ds, set())
+
+
+def test_empty_selection_mandatory_on_plan():
+    """Pusty wybór: części pojedyncze przedmiotów obowiązkowych są na planie
+    automatycznie, więc żaden kurs z danymi nie jest zgłaszany jako „wymagany
+    przedmiot” (ten komunikat zostaje tylko dla przedmiotów bez danych);
+    część grupowa wymaga wyboru grupy."""
+    ds = _dataset()
+    status = evaluate(ds, set())
+    obligatory = next(c for c in ds.categories if c.is_obligatory)
+
+    grouped = [c for c in obligatory.courses if any(len(p.offerings) > 1 for p in c.parts)]
+    assert grouped  # w danych są obowiązkowe części z wyborem grupy
+    for course in grouped:
+        part = next(p for p in course.parts if len(p.offerings) > 1)
+        assert any(
+            "wybierz grupę" in m and course.name in m and part.kind in m
+            for m in status["missing"]
+        )
+
+    # kursy z danymi (z częściami pojedynczymi wliczonymi automatycznie)
+    # nie mogą być zgłaszane jako brakujący przedmiot
+    with_parts = [c for c in obligatory.courses if c.parts]
+    assert with_parts
+    for course in with_parts:
+        assert not any(
+            "wymagany przedmiot" in m and course.name in m for m in status["missing"]
+        )
+
+
+def test_implicit_single_part_with_chosen_group():
+    """Kurs obowiązkowy: wykład 1 grupa + ćwiczenia 2 grupy — wykład jest na
+    planie niezależnie od wyboru grupy ćwiczeń (niczego nie trzeba klikać)."""
+    ds = _dataset()
+    obligatory = next(c for c in ds.categories if c.is_obligatory)
+    course = next(
+        c for c in obligatory.courses
+        if any(len(p.offerings) > 1 for p in c.parts)
+        and any(len(p.offerings) == 1 for p in c.parts)
+    )
+    grouped = next(p for p in course.parts if len(p.offerings) > 1)
+    single = next(p for p in course.parts if len(p.offerings) == 1)
+
+    # bez żadnego wyboru…
+    assert single.offerings[0].zid in implicit_zids(ds, set())
+    # …i po wyborze grupy ćwiczeń (kurs aktywny) wykład dalej jest na planie
+    chosen = {grouped.offerings[0].zid}
+    assert single.offerings[0].zid in implicit_zids(ds, chosen)
