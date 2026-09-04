@@ -141,8 +141,12 @@ def test_implicit_obligatory_in_ics_export():
 
 def test_selection_pdf_ok():
     """Endpoint PDF z działającym (zamockowanym) rendererem serwerowym."""
+    from app.logic.constraints import implicit_zids
+
     app = _app()
     zid = 765361
+    # eksport domyka wybór o zajęcia wpisane na plan automatycznie
+    expected = sorted({zid} | implicit_zids(app.dataset, {zid}))
 
     async def scenario():
         from app.logic import pdf as pdf_mod
@@ -165,7 +169,7 @@ def test_selection_pdf_ok():
         assert res.content_type.startswith("application/pdf")
         assert 'filename="plan-zajec.pdf"' in res.headers["Content-Disposition"]
         assert (await res.get_data()).startswith(b"%PDF")
-        assert calls == [([zid], "A")]
+        assert calls == [(expected, "A")]
 
     run(scenario())
 

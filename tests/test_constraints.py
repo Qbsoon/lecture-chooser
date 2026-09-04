@@ -11,6 +11,7 @@ from app.core.models import (
     Offering,
     Part,
     Series,
+    TimetableEntry,
 )
 from app.core.source import FileDataLoader
 from app.logic.constraints import evaluate, implicit_zids
@@ -102,11 +103,25 @@ def test_two_groups_same_part_is_error():
 
 
 def test_time_collision_is_warning():
-    ds = _dataset()
-    # Teoria lab Grupa 1 (pon 09:10-10:00) vs Bezpieczeństwo seminarium (pon 09:10-09:50)
-    status = evaluate(ds, {765361, 758196})
+    # na mini-datasecie: terminy nie zależą od aktualnego zrzutu z S4A
+    ds = _mini_dataset()
+    # ćwiczenia Grupa 1 kursu mieszanego (pon 09:10-10:00)
+    _timetable(ds.offerings[2], day=0, start=9 * 60 + 10, end=10 * 60)
+    # przedmiot do wyboru (pon 09:10-09:50)
+    _timetable(ds.offerings[5], day=0, start=9 * 60 + 10, end=9 * 60 + 50)
+    status = evaluate(ds, {2, 5})
     assert status["ok"] is True
     assert any("Kolizja" in w for w in status["warnings"])
+
+
+def test_time_collision_respects_cycles():
+    ds = _mini_dataset()
+    # te same godziny w poniedziałek, ale w przeciwnych tygodnach
+    _timetable(ds.offerings[2], day=0, start=9 * 60 + 10, end=10 * 60, cycle="A")
+    _timetable(ds.offerings[5], day=0, start=9 * 60 + 10, end=9 * 60 + 50, cycle="B")
+    status = evaluate(ds, {2, 5})
+    assert status["ok"] is True
+    assert status["warnings"] == []
 
 
 # ---------- zajęcia wpisane na plan automatycznie (implicit) ----------
@@ -114,6 +129,15 @@ def test_time_collision_is_warning():
 
 def _offering(zid, kind, group=None):
     return Offering(zid=zid, kind=kind, group=group, points="Z/3", hours=30, teachers=[])
+
+
+def _timetable(offering, day, start, end, cycle="T"):
+    """Jeden wpis rozkładu dla offeringu (kolizje w testach syntetycznych)."""
+    offering.timetable = [TimetableEntry(
+        zid=offering.zid, day=day, start=start, end=end, cycle=cycle,
+        room=None, online=False, hybrid=False, subject="", kind=offering.kind,
+        group=offering.group, teacher="",
+    )]
 
 
 def _mini_dataset() -> Dataset:
