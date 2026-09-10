@@ -1,9 +1,6 @@
 """Testy czystych helperów klienta scrapingu na fixture'ach (bez sieci).
 
-Fixture'y:
-- tests/fixtures/ — zebrane na żywo 2026-09-04 (patrz komentarze w plikach);
-- korzeń repo — week_chooser*.html, other_example*.html (przekazane przez
-  użytkownika; strukturę e-KUL odwzorowują 1:1).
+Fixture'y w tests/fixtures/ — zebrane na żywo 2026-09-04 (patrz komentarze w plikach).
 """
 from __future__ import annotations
 
@@ -22,16 +19,15 @@ from app.scraping.client import (
     semester_tables,
 )
 
-REPO = Path(__file__).resolve().parents[1]
-FIX = REPO / "tests" / "fixtures"
+FIX = Path(__file__).resolve().parent / "fixtures"
 
-WEEK_CHOOSER = (REPO / "week_chooser.html").read_text(encoding="utf-8")
-STAGE_PAGE = (REPO / "week_chooser_chosen.html").read_text(encoding="utf-8")
+WEEK_CHOOSER = (FIX / "week_chooser.html").read_text(encoding="utf-8")
+STAGE_PAGE = (FIX / "week_chooser_chosen.html").read_text(encoding="utf-8")
 LOGIN_FORM = (FIX / "login_form.html").read_text(encoding="utf-8")
 NO_DATA_PAGE = (FIX / "qlplan_no_data_kid4382.html").read_text(encoding="utf-8")
 EMPTY_FACULTY = (FIX / "qlplan_empty_faculty_wid5545.html").read_text(encoding="utf-8")
 PROGRAM_ETAP0 = (FIX / "qlprogram_etap0_kid2400_sem12.html").read_text(encoding="utf-8")
-WEEK_DATATAB2 = (REPO / "other_example_2.html").read_text(encoding="utf-8")
+WEEK_DATATAB2 = (FIX / "other_example_2.html").read_text(encoding="utf-8")
 
 
 def _data_rows(table_html: str) -> int:

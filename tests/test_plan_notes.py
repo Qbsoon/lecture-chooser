@@ -5,7 +5,7 @@ Fixture other_example.html (S4A, SI I st., etap 6) ma sekcje:
 - 'Przedmioty do wyboru (D)' + '(należy wybrać 120 godz., 12 pkt. ECTS)'
 - 'Seminaria do wyboru'      + '(należy kontynuować wybrane seminarium)'
 - 'Praca dyplomowa'          (bez notki -> brak limitu)
-Rozkład zajęć do tego planu to other_example_2.html.
+Rozkład zajęć do tego planu to other_example_2.html (tests/fixtures/).
 """
 from __future__ import annotations
 
@@ -18,9 +18,9 @@ from app.core.models import Offering
 from app.core.parsers import amount_from_note, parse_note, parse_plan_table
 from app.logic.constraints import evaluate
 
-REPO = Path(__file__).resolve().parent.parent
-OTHER = (REPO / "other_example.html").read_text(encoding="utf-8")
-OTHER2 = (REPO / "other_example_2.html").read_text(encoding="utf-8")
+FIX = Path(__file__).resolve().parent / "fixtures"
+OTHER = (FIX / "other_example.html").read_text(encoding="utf-8")
+OTHER2 = (FIX / "other_example_2.html").read_text(encoding="utf-8")
 _SCRAPE_DIR = REPO / "app" / "data" / "scraped" / "6089" / "1"
 if not (_SCRAPE_DIR / "plan.html").is_file():
     pytest.skip(

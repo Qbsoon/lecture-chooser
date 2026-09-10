@@ -1,7 +1,7 @@
 """Wpisy datowane („zajęcia w cyklu nieregularnym”) — krok 5 planu.
 
 Zakres:
-* ``parse_week_table`` na ``other_example_2.html`` (repo root): pełna strona
+* ``parse_week_table`` na ``other_example_2.html`` (tests/fixtures/): pełna strona
   qlplan z datatab_1 (cykliczne) + datatab_2 (datowane) — plik parsuje się
   w całości, wpis datowany dostaje ``date``, a dzień wynika z daty;
 * ``week_of_date`` / ``entries_meet`` (modele) — tydzień semestru z daty
@@ -30,6 +30,7 @@ from app.logic.constraints import evaluate
 from app.logic.ics import build_ics
 
 REPO = Path(__file__).resolve().parents[1]
+FIX = Path(__file__).resolve().parent / "fixtures"
 DATA = REPO / "app" / "data" / "scraped" / "6089" / "1"
 if not (DATA / "week.html").is_file():
     pytest.skip(
@@ -38,7 +39,7 @@ if not (DATA / "week.html").is_file():
         allow_module_level=True,
     )
 WEEK_HTML = (DATA / "week.html").read_text(encoding="utf-8")
-OTHER_EXAMPLE = (REPO / "other_example_2.html").read_text(encoding="utf-8")
+OTHER_EXAMPLE = (FIX / "other_example_2.html").read_text(encoding="utf-8")
 
 SEMESTER_START = "2026-10-05"  # poniedziałek 1. tygodnia semestru
 

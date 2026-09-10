@@ -1,7 +1,7 @@
 # lecture_chooser
 
 Interaktywny kreator planu zajęć: kalendarz tygodniowy zbudowany z rozkładu zajęć
-(`week.html`) połączony z planem studiów (`plan.html`), który dostarcza
+połączony z planem studiów, który dostarcza
 podziału na kategorie/serie i ograniczeń wyboru (`settings.json`).
 Dane pochodzą wyłącznie ze scrapingu portalu e-KUL (`scripts/scrape.py`).
 
@@ -142,8 +142,9 @@ pytest
 
 ## Docker
 
-`docker-compose.yml` używa `image: lecture-chooser:latest` — obraz buduj z
-`Dockerfile` w tym repo (`docker build -t lecture-chooser .`). Wolumen
+`docker-compose.yml` używa `image: lecture-chooser:latest` — obraz znajduje się
+w moim dockerhub (https://hub.docker.com/repository/docker/qbsoon/lecture-chooser/general)
+można też zbudować własnoręcznie (`docker build -t lecture-chooser .`). Wolumen
 `./app/data/scraped` zapewnia trwałość danych między restartami. Healthcheck
 odpytuje `/api/health` co 30 s. Zmienne `EKUL_LOGIN`/`EKUL_PASSWORD` odkomentuj
 w sekcji `environment` `docker-compose.yml`, aby włączyć usługę odświeżania.
@@ -157,10 +158,3 @@ obraz osadzony w PDF).
 docker build -t lecture-chooser .
 docker compose up -d
 ```
-
-## Rozszerzalność
-
-Źródło danych jest abstrakcją `DataLoader` (`app/core/source.py`) — obecnie
-`FileDataLoader` czyta pliki z dysku. Dodanie w przyszłości wgrywania własnych plików
-to nowa implementacja tego protokołu + trasa uploadu; reszta aplikacji (parsery,
-logika, API) pozostaje bez zmian.
