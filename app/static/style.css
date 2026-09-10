@@ -350,6 +350,28 @@ html, body {
   box-shadow: var(--shadow);
 }
 
+/* ---------- stopka ---------- */
+
+.site-footer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 20px;
+  font-size: 0.78rem;
+  color: var(--muted);
+  flex-wrap: wrap;
+}
+
+.site-footer a {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.site-footer a:hover {
+  text-decoration: underline;
+}
+
 /* ---------- kalendarz ---------- */
 
 .cal-scroll { overflow-x: auto; }
@@ -749,7 +771,7 @@ details.dropdown[open] > summary { border-color: var(--accent); background: var(
     --grid-line: #e2e8f0;
   }
 
-  .topbar, #courseBar, #statusPanel, .picker, #toast { display: none !important; }
+  .topbar, #courseBar, #statusPanel, .picker, #toast, .site-footer { display: none !important; }
 
   .layout { display: block; padding: 0; }
 

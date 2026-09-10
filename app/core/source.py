@@ -13,7 +13,6 @@ istnieje ``ScrapedDataLoader`` dla dowolnego ``(kid, etap)`` ze
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Protocol
 
@@ -35,9 +34,6 @@ def _candidate_dirs(data_dir: str | Path | None = None) -> list[Path]:
     dirs: list[Path] = []
     if data_dir is not None:
         dirs.append(Path(data_dir))
-    env_dir = os.environ.get("DATA_DIR")
-    if env_dir:
-        dirs.append(Path(env_dir))
     app_dir = Path(__file__).resolve().parents[1]  # katalog pakietu app/
     dirs.extend([Path("app/data"), app_dir / "data"])
     # deduplikacja ze zachowaniem kolejności
@@ -82,7 +78,7 @@ class FileDataLoader:
 
     Kanoniczne położenie to katalog `app/data/` (plan/week pod
     `scraped/{kid}/{etap}/` — produkty scrapingu). Kolejność przeszukiwania:
-    `data_dir` (jeśli podany), `$DATA_DIR`, `./app/data`, katalog `app/data`
+    `data_dir` (jeśli podany), `./app/data`, katalog `app/data`
     względem położenia tego pliku (fallback dla `quart run` uruchomionego z
     innego miejsca).
     """

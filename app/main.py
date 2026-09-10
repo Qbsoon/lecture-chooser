@@ -1,8 +1,6 @@
 """Trasy aplikacji: strona główna + API."""
 from __future__ import annotations
 
-import os
-
 from quart import Blueprint, Response, current_app, jsonify, render_template, request
 
 from .logic.constraints import evaluate, implicit_zids
@@ -115,6 +113,27 @@ async def api_refresh_course(kid: int):
         return jsonify({"error": f"Nieznany kierunek (kid={kid})"}), 404
     _status, code, detail = queue.request_refresh(kid)
     return jsonify(detail), code
+
+
+@bp.route("/api/health")
+async def api_health() -> dict:
+    """Status aplikacji + usługi odświeżania (healthcheck, krok 11).
+
+    Zawsze 200 gdy aplikacja żyje. ``refresh_service`` mówi, czy worker
+    odświeżania wystartował (czyli czy ``EKUL_LOGIN``/``EKUL_PASSWORD``
+    są ustawione); pozostałe pola — stan kolejki i liczniki dobowe.
+    """
+    queue = getattr(current_app, "refresh_queue", None)
+    if queue is None:
+        return jsonify({"status": "ok", "refresh_service": False})
+    state = queue.state
+    return jsonify({
+        "status": "ok",
+        "refresh_service": True,
+        "queue_length": len(state.queue),
+        "requests_today": state.requests_today,
+        "last_weekly": state.last_weekly,
+    })
 
 
 def _course_pair(kid: int | None, etap: int | None) -> tuple[int, int] | None:
@@ -304,9 +323,8 @@ async def api_selection_pdf() -> Response | tuple[Response, int]:
         return jsonify({"error": "Brak danych kierunku (app/data/scraped/)"}), 404
     zids = _zids_from_request()
     view = request.args.get("view", "sum")
-    base_url = os.environ.get("PDF_BASE_URL") or request.host_url
     try:
-        pdf = await render_pdf(base_url, zids, view)
+        pdf = await render_pdf(request.host_url, zids, view)
     except PlaywrightUnavailable as exc:
         current_app.logger.warning("Serwerowy PDF niedostępny: %s", exc)
         return jsonify({"error": "Generator PDF niedostępny na serwerze"}), 503

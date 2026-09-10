@@ -1,4 +1,6 @@
-# Obraz budowany i hostowany poza tym repozytorium (celowo bez `build`).
+# Obraz budowany z Dockerfile w tym repozytorium (hostowanie poza zakresem compose).
+# Bez EKUL_LOGIN/EKUL_PASSWORD usługa odświeżania nie startuje —
+# aplikacja działa normalnie na danych już na dysku.
 services:
   lecture_chooser:
     image: lecture-chooser:latest
@@ -6,6 +8,17 @@ services:
     ports:
       - "8000:8000"
     environment:
-      SECRET_KEY: ${SECRET_KEY:-please-change-me}
-      # DATA_DIR: /app/app/data  # odkomentuj, jeśli pliki danych są w innym katalogu niż domyślny (app/data w WORKDIR /app)
+      SECRET_KEY: please-change-me
+      # Odkomentuj i ustaw, aby włączyć usługę odświeżania:
+      # EKUL_LOGIN: twoj.login@kul.lublin.pl
+      # EKUL_PASSWORD: twoje-haslo
+    volumes:
+      # trwałość zebranych danych między restartami kontenera
+      - ./app/data/scraped:/app/app/data/scraped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped

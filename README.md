@@ -31,6 +31,49 @@ na dysku są pomijane bez żądań; `--wid`/`--kid` ograniczają zbiór.
 Kierunki ignorujące `etap=0` (np. studia podyplomowe) mają fallback:
 plany pobierane per semestr, po 1 żądaniu.
 
+## Zmienne środowiskowe
+
+Aplikacja czyta konfigurację z pliku `.env` w katalogu projektu (format
+`KLUCZ=WARTOŚĆ`, komentarze `#`, cudzysłowy wokół wartości zjadane) oraz
+ze zmiennych środowiskowych (te mają pierwszeństwo). Dostępne zmienne:
+
+| zmienna | wymagana | opis |
+|---|---|---|
+| `SECRET_KEY` | nie | sekret do podpisywania ciasteczka wyboru (domyślnie `dev-only-insecure-secret` — **zmień w produkcji**) |
+| `EKUL_LOGIN` | nie | login e-KUL; włącza usługę odświeżania (bez niej worker nie startuje) |
+| `EKUL_PASSWORD` | nie | hasło e-KUL (paruje z `EKUL_LOGIN`) |
+
+Przykładowy `.env`:
+```
+SECRET_KEY=zmień-mnie-na-losowy-ciąg
+EKUL_LOGIN=jan.kowalski@kul.lublin.pl
+EKUL_PASSWORD=moje-hasło
+```
+
+## Ustawienia scrapingu (`settings["scraping"]`)
+
+Sekja `scraping` w `app/data/settings.json` kontroluje wszystkie tempa,
+limity i częstotliwości odświeżania (bez dotykania kodu):
+
+| klucz | domyślnie | opis |
+|---|---|---|
+| `base_url` | `https://e.kul.pl` | bazowy URL portalu e-KUL |
+| `request_delay` | `[2, 6]` | zakres [min, max] sekund pauzy między żądaniami (losowy jitter) |
+| `batch_size` | `25` | po tylu żądaniach dłuższa przerwa (dla odświeżania na żądanie) |
+| `batch_pause` | `300` | długość przerwy co `batch_size` żądań (sekundy) |
+| `daily_requests` | `100` | globalny limit żądań e-KUL dziennie (odświeżanie na żądanie) |
+| `per_course_daily` | `5` | limit odświeżeń per kierunek dziennie |
+| `per_course_cooldown_minutes` | `15` | cooldown między odświeżeniami tego samego kierunku |
+| `weekly_refresh` | `{"weekday":"sat","hour":4}` | dzień i godzina cyklu tygodniowego |
+| `login_counts_towards_limit` | `true` | czy logowanie e-KUL liczy się do limitu dobowego |
+| `bootstrap.request_delay` | `[1, 2]` | tempo bootstrapu i cyklu tygodniowego (krótsze pauzy) |
+| `bootstrap.batch_size` | `50` | przerwa co N żądań dla bootstrapu i cyklu tygodniowego |
+| `bootstrap.batch_pause` | `60` | długość przerwy w bootstrapie i cyklu tygodniowym (sekundy) |
+
+Cykl tygodniowy (scheduler) używa tempa z sekcji `bootstrap` — krótsze pauzy
+i przerwa co 50 żądań, ale **bez** limitów dobowych/per-kierunek/cooldown
+(jak bootstrap, nie jak odświeżanie na żądanie).
+
 ### Usługa odświeżania (worker)
 
 Aplikacja może sama odświeżać dane e-KUL w tle — kolejka FIFO per
@@ -51,10 +94,7 @@ wybór wraca). Semestry bez danych na dysku są wyszarzone („· brak danych”
 Przycisk **„Odśwież”** kolejkuje pobranie całego kierunku z e-KUL (limity jak
 wyżej), a po jego wykonaniu strona sama przeładowuje nowy dataset.
 Domyślnie startuje informatyka II st., semestr 1 (kid=6089, etap=1).
-Ustawienia (`settings.json`)
-leżą w katalogu `app/data/`. Loader wyszukuje pliki (w tej kolejności):
-`$DATA_DIR`, `./app/data` — patrz `app/core/source.py`.
-Do własnej lokalizacji służy zmienna `DATA_DIR`.
+Ustawienia (`settings.json`) leżą w katalogu `app/data/`.
 
 ## Ograniczenia wyboru (notki w tabeli planu)
 
@@ -76,6 +116,7 @@ planu studiów (`plan.html`), rozpoznawane przez `parse_note`
 | metoda | ścieżka | opis |
 |---|---|---|
 | GET | `/` | strona główna (kalendarz + picker) |
+| GET | `/api/health` | status aplikacji + usługi odświeżania (`refresh_service`, `queue_length`, `requests_today`, `last_weekly`); healthcheck Dockera |
 | GET | `/api/catalog` | drzewo wydziały → kierunki (etapy, `available_etaps` z danymi na dysku, `last_refreshed`) |
 | GET | `/api/dataset` | plan + rozkład + ograniczenia (JSON); `?kid=&etap=` przełącza kierunek (zapamiętywany w ciasteczku — bez parametrów: ciasteczko → kierunek domyślny) |
 | POST | `/api/courses/<kid>/refresh` | kolejkuje odświeżenie kierunku: 202 dodano/już w kolejce, 429 cooldown/limit per-kierunek (`retry_after_minutes`), 503 dzienny limit lub usługa wyłączona (bez `EKUL_LOGIN`/`EKUL_PASSWORD`), 404 nieznany kierunek |
@@ -101,27 +142,21 @@ pytest
 
 ## Docker
 
-`docker-compose.yml` używa wyłącznie `image: lecture-chooser:latest` (build i hosting
-obrazu poza zakresem tego repo). Dla własnego Dockerfile wystarczy np.:
+`docker-compose.yml` używa `image: lecture-chooser:latest` — obraz buduj z
+`Dockerfile` w tym repo (`docker build -t lecture-chooser .`). Wolumen
+`./app/data/scraped` zapewnia trwałość danych między restartami. Healthcheck
+odpytuje `/api/health` co 30 s. Zmienne `EKUL_LOGIN`/`EKUL_PASSWORD` odkomentuj
+w sekcji `environment` `docker-compose.yml`, aby włączyć usługę odświeżania.
 
-```dockerfile
-FROM python:3.12-slim
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY . .
-CMD ["hypercorn", "--bind", "0.0.0.0:8000", "app:app"]
+Dockerfile instaluje Playwright + Chromium (serwerowy PDF) oraz `fonts-liberation`
+(polskie znaki w system-ui). Bez tego `/api/selection.pdf` zwraca 503,
+a „PDF (plik)” spada na wersję generowaną w przeglądarce (kalendarz jako
+obraz osadzony w PDF).
+
+```bash
+docker build -t lecture-chooser .
+docker compose up -d
 ```
-
-Serwerowy PDF (Playwright + Chromium) wymaga w obrazie dodatkowo
-(przydatne też `fonts-liberation`, żeby system-ui miał polskie znaki):
-
-```dockerfile
-RUN playwright install --with-deps chromium
-```
-
-Bez tego `/api/selection.pdf` zwraca 503, a „PDF (plik)” spada na wersję
-generowaną w przeglądarce (kalendarz jako obraz osadzony w PDF).
 
 ## Rozszerzalność
 

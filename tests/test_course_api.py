@@ -293,3 +293,51 @@ def test_selection_cookie_roundtrip_with_course():
     assert week == 4
     assert kid is None
     assert etap is None
+
+
+# -- /api/health (krok 11) -----------------------------------------------
+
+
+def test_health_no_refresh_service(monkeypatch):
+    """Bez EKUL_LOGIN/EKUL_PASSWORD health zwraca refresh_service=False."""
+
+    async def scenario():
+        app = _app(monkeypatch)
+        async with app.test_client() as client:
+            res = await client.get("/api/health")
+            assert res.status_code == 200
+            data = await res.get_json()
+            assert data["status"] == "ok"
+            assert data["refresh_service"] is False
+            # bez serwisu brak pól kolejki
+            assert "queue_length" not in data
+            assert "requests_today" not in data
+            assert "last_weekly" not in data
+
+    run(scenario())
+
+
+def test_health_with_refresh_service(monkeypatch):
+    """Z EKUL_LOGIN/EKUL_PASSWORD health zwraca refresh_service=True + pola kolejki."""
+
+    async def scenario():
+        # neutralizuj .env (gdyby w katalogu projektu był prawdziwy),
+        # ustaw fałszywe credencjały — worker startuje ale pusta kolejka
+        # nie wysyła żadnych żądań (patrz run_forever → run_once → None)
+        monkeypatch.setattr("app._read_dotenv", lambda path: {})
+        monkeypatch.setenv("EKUL_LOGIN", "test@example.com")
+        monkeypatch.setenv("EKUL_PASSWORD", "secret")
+
+        app = create_app(str(DATA))
+
+        async with app.test_client() as client:
+            res = await client.get("/api/health")
+            assert res.status_code == 200
+            data = await res.get_json()
+            assert data["status"] == "ok"
+            assert data["refresh_service"] is True
+            assert "queue_length" in data
+            assert "requests_today" in data
+            assert "last_weekly" in data
+
+    run(scenario())

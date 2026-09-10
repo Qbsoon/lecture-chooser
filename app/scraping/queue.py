@@ -51,6 +51,15 @@ HTTP_CODES: dict[str, int] = {
 
 _IDLE_SECONDS = 5.0  # odpychanie pustej kolejki / wyczerpanych limitów
 
+#: Bramkowanie dla zadań z cyklu tygodniowego — bez limitów dobowych
+#: / per-kierunek / cooldown (jak bootstrap). Tempo żądań (delay + pauza
+#: co N żądań) kontrolowane osobno w ``run_once`` przez ``scheduled_*``.
+SCHEDULED_LIMITS = Limits(
+    daily_requests=10**9,
+    per_course_daily=10**9,
+    cooldown_minutes=0,
+)
+
 
 class RefreshQueue:
     """FIFO odświeżeń per kierunek; bramka limitów + pojedynczy worker."""
@@ -64,10 +73,20 @@ class RefreshQueue:
         now: NowFn | None = None,
         sleep: SleepFn = asyncio.sleep,
         on_refreshed: Callable[[int], None] | None = None,
+        scheduled_limits: Limits | None = None,
+        scheduled_batch_size: int = 50,
+        scheduled_batch_pause: float = 60.0,
+        scheduled_set_delay: Callable[[bool], None] | None = None,
     ) -> None:
         self.state = state
         self._refresh = refresh
         self.limits = limits
+        self.scheduled_limits = scheduled_limits or SCHEDULED_LIMITS
+        self._scheduled_batch_size = scheduled_batch_size
+        self._scheduled_batch_pause = scheduled_batch_pause
+        self._scheduled_set_delay = scheduled_set_delay
+        self._scheduled_requests = 0
+        self._next_scheduled_pause = scheduled_batch_size
         self._now: NowFn = now or (lambda: datetime.now(timezone.utc))
         self._sleep: SleepFn = sleep
         self.on_refreshed = on_refreshed  # np. invalidacja cache datasetów
@@ -122,11 +141,20 @@ class RefreshQueue:
         Zwraca ``"done"`` / ``"done_error"`` / ``"cooldown"`` (poczekano
         i wykonano) / ``"per_course_daily"`` / ``"daily_requests"``
         (zadanie zostaje w kolejce) / ``None`` (kolejka pusta).
+
+        Zadania z cyklu tygodniowego (``state.scheduled``) używają luźnych
+        limitów bramkowych (``SCHEDULED_LIMITS`` — bez limitów dobowych
+        / per-kierunek / cooldown, jak bootstrap) oraz tempa bootstrapa:
+        ``request_delay`` z ``settings["scraping"]["bootstrap"]`` + pauza
+        ``batch_pause`` sekund co ``batch_size`` żądań. Nie liczą się do
+        limitów użytkownika (``requests_today`` / ``refreshes_today``).
         """
         if not self.state.queue:
             return None
         kid = self.state.queue[0]
-        ok, reason, remaining = self.state.check_add(kid, self._now(), self.limits)
+        was_scheduled = kid in self.state.scheduled
+        limits = self.scheduled_limits if was_scheduled else self.limits
+        ok, reason, remaining = self.state.check_add(kid, self._now(), limits)
         if not ok:
             if reason == "cooldown":
                 # pojedynczy worker + FIFO → po odczekaniu wykonujemy zadanie
@@ -135,24 +163,44 @@ class RefreshQueue:
                 # limity dobowe/per-kierunek — zadanie zostaje na później
                 return reason
         self.state.queue.pop(0)
+        if was_scheduled:
+            self.state.scheduled.discard(kid)
         self._running.add(kid)
         self.state.save()
+        if was_scheduled and self._scheduled_set_delay is not None:
+            self._scheduled_set_delay(True)
         try:
             used = await self._refresh(kid)
             now = self._now()
-            self.state.record_request(used, now)
-            self.state.record_refresh(kid, now)
+            if not was_scheduled:
+                self.state.record_request(used, now)
+            self.state.record_refresh(kid, now, scheduled=was_scheduled)
             if self.on_refreshed is not None:
                 try:
                     self.on_refreshed(kid)
                 except Exception:  # callback nie może wywrócić workera
                     logger.exception("on_refreshed(kid=%d) rzucił wyjątek", kid)
+            if was_scheduled:
+                # pauza co batch_size żądań — łagodne tempo jak bootstrap
+                self._scheduled_requests += used
+                while (
+                    self._scheduled_requests >= self._next_scheduled_pause
+                ):
+                    logger.info(
+                        "cykl tygodniowy: pauza %.0fs po %d żądaniach",
+                        self._scheduled_batch_pause,
+                        self._scheduled_requests,
+                    )
+                    await self._sleep(self._scheduled_batch_pause)
+                    self._next_scheduled_pause += self._scheduled_batch_size
             logger.info("kid=%d odświeżony (%d żądań)", kid, used)
             return "done"
         except Exception as exc:  # izolacja błędu pojedynczego zadania
             logger.warning("kid=%d: odświeżenie nieudane: %s", kid, exc)
             return "done_error"
         finally:
+            if was_scheduled and self._scheduled_set_delay is not None:
+                self._scheduled_set_delay(False)
             self._running.discard(kid)
             self.state.save()
 
@@ -180,13 +228,24 @@ class EkulRefresher:
         *,
         base_url: str = DEFAULT_BASE_URL,
         request_delay: tuple[float, float] = (2.0, 6.0),
+        scheduled_request_delay: tuple[float, float] | None = None,
     ) -> None:
         self._username = username
         self._password = password
         self.data_dir = Path(data_dir)
         self._base_url = base_url
+        self._regular_delay = request_delay
+        self._scheduled_delay = scheduled_request_delay or request_delay
         self._request_delay = request_delay
         self._client: EkulClient | None = None
+
+    def set_scheduled_delay(self, scheduled: bool) -> None:
+        """Przełącza ``request_delay`` klienta dla zadań z cyklu tygodniowego."""
+        self._request_delay = (
+            self._scheduled_delay if scheduled else self._regular_delay
+        )
+        if self._client is not None:
+            self._client._request_delay = self._request_delay
 
     def _wid_for_kid(self, kid: int) -> int:
         catalog = load_catalog(self.data_dir)
@@ -264,13 +323,24 @@ def build_refresh_service(
     directory = resolve_data_dir(data_dir)
     scraping = _scraping_settings(directory)
     delay = scraping.get("request_delay", (2, 6))
+    boot = scraping.get("bootstrap", {})
+    boot_delay = tuple(boot.get("request_delay", (1, 2)))
     refresher = EkulRefresher(
         username,
         password,
         directory,
         base_url=str(scraping.get("base_url", DEFAULT_BASE_URL)),
         request_delay=(float(delay[0]), float(delay[1])),
+        scheduled_request_delay=(float(boot_delay[0]), float(boot_delay[1])),
     )
     state = ScrapeState.load(directory)
-    queue = RefreshQueue(state, refresher.refresh, Limits.from_settings(scraping))
+    queue = RefreshQueue(
+        state,
+        refresher.refresh,
+        Limits.from_settings(scraping),
+        scheduled_limits=SCHEDULED_LIMITS,
+        scheduled_batch_size=int(boot.get("batch_size", 50)),
+        scheduled_batch_pause=float(boot.get("batch_pause", 60)),
+        scheduled_set_delay=refresher.set_scheduled_delay,
+    )
     return queue, refresher

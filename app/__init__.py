@@ -12,6 +12,7 @@ from .core.dataset import DatasetCache
 from .logic.pdf import close_pdf_renderer
 from .main import bp
 from .scraping.queue import build_refresh_service
+from .scraping.scheduler import WeeklyScheduler
 
 
 def _read_dotenv(path: Path) -> dict[str, str]:
@@ -63,9 +64,17 @@ def create_app(data_dir: str | None = None) -> Quart:
         app.refresh_queue = refresh_queue
         app.refresh_task: asyncio.Task | None = None
 
+        # krok 10: scheduler tygodniowy — raz w tygodniu (domyślnie sobota
+        # 4:00 z settings) wsadza wszystkie kierunki do kolejki w losowej
+        # kolejności; worker rozkłada je w ramach limitów dobowych, a
+        # zadania bez limitu zostają na kolejny dzień, aż cykl się domknie.
+        scheduler = WeeklyScheduler(refresh_queue, refresh_queue.state.data_dir)
+        app.scheduler_task: asyncio.Task | None = None
+
         @app.before_serving
         async def _start_refresh_worker() -> None:
             app.refresh_task = asyncio.create_task(refresh_queue.run_forever())
+            app.scheduler_task = asyncio.create_task(scheduler.run_forever())
 
         @app.after_serving
         async def _stop_refresh_worker() -> None:
@@ -73,6 +82,10 @@ def create_app(data_dir: str | None = None) -> Quart:
                 app.refresh_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await app.refresh_task
+            if app.scheduler_task is not None:
+                app.scheduler_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await app.scheduler_task
             await refresher.close()
 
     # zamykamy współdzielone Chromium generatora PDF przy zatrzymaniu aplikacji

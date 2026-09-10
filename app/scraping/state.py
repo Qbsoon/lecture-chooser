@@ -12,7 +12,9 @@ wspólny helper z ``storage.py``)::
           "last_refreshed": "2026-09-04T10:31:00+00:00"
         }
       },
-      "queue": [27, 6089]            # FIFO zadań odświeżenia (per kierunek)
+      "queue": [27, 6089],           # FIFO zadań odświeżenia (per kierunek)
+      "last_weekly": "2026-09-05",   # data ostatniego cyklu tygodniowego (krok 10)
+      "scheduled": [27]              # kierunki z cyklu tygodniowego (krok 10)
     }
 
 Liczniki dobowe resetują się przy zmianie dnia (``_roll_day`` wołane
@@ -72,12 +74,16 @@ class ScrapeState:
         requests_today: int = 0,
         courses: dict[str, dict[str, Any]] | None = None,
         queue: list[int] | None = None,
+        last_weekly: str = "",
+        scheduled: set[int] | None = None,
     ) -> None:
         self.data_dir = Path(data_dir)
         self.day = day
         self.requests_today = requests_today
         self.courses: dict[str, dict[str, Any]] = courses or {}
         self.queue: list[int] = queue or []
+        self.last_weekly = last_weekly
+        self.scheduled: set[int] = scheduled or set()
 
     # -- trwałość ------------------------------------------------------
 
@@ -99,6 +105,8 @@ class ScrapeState:
                 str(kid): dict(entry) for kid, entry in (raw.get("courses") or {}).items()
             },
             queue=[int(kid) for kid in raw.get("queue") or []],
+            last_weekly=str(raw.get("last_weekly", "")),
+            scheduled={int(kid) for kid in (raw.get("scheduled") or [])},
         )
 
     def save(self) -> None:
@@ -110,6 +118,8 @@ class ScrapeState:
                 "requests_today": self.requests_today,
                 "courses": self.courses,
                 "queue": self.queue,
+                "last_weekly": self.last_weekly,
+                "scheduled": sorted(self.scheduled),
             },
         )
 
@@ -161,20 +171,34 @@ class ScrapeState:
         if count > 0:
             self.requests_today += count
 
-    def record_refresh(self, kid: int, now: datetime) -> None:
-        """Kończy odświeżenie kierunku: licznik per-kierunek + timestamp."""
+    def record_refresh(self, kid: int, now: datetime, *, scheduled: bool = False) -> None:
+        """Kończy odświeżenie kierunku: licznik per-kierunek + timestamp.
+
+        ``scheduled=True`` — odświeżenie z cyklu tygodniowego; aktualizuje
+        ``last_refreshed`` (UI + cooldown dla użytkownika), ale nie zużywa
+        limitu per-kierunek (``refreshes_today`` — ten jest tylko dla użytkowników).
+        """
         self._roll_day(now)
         entry = self.course_entry(kid)
-        entry["refreshes_today"] = int(entry.get("refreshes_today", 0)) + 1
+        if not scheduled:
+            entry["refreshes_today"] = int(entry.get("refreshes_today", 0)) + 1
         entry["last_refreshed"] = now.isoformat()
 
     # -- kolejka ------------------------------------------------------------
 
-    def enqueue(self, kid: int) -> bool:
-        """Dodaje kierunek do FIFO; ``False`` gdy już jest w kolejce."""
+    def enqueue(self, kid: int, *, scheduled: bool = False) -> bool:
+        """Dodaje kierunek do FIFO; ``False`` gdy już jest w kolejce.
+
+        ``scheduled=True`` oznacza zadanie z cyklu tygodniowego — worker
+        używa luźnych limitów bramkowych (``SCHEDULED_LIMITS``) i tempa
+        bootstrapa (``request_delay`` + pauza co N żądań), nie liczy do
+        limitów użytkownika (``daily_requests``, ``per_course_daily``).
+        """
         if kid in self.queue:
             return False
         self.queue.append(kid)
+        if scheduled:
+            self.scheduled.add(kid)
         return True
 
     def queued(self, kid: int) -> bool:
