@@ -1,4 +1,3 @@
-# Obraz budowany z Dockerfile w tym repozytorium (hostowanie poza zakresem compose).
 # Bez EKUL_LOGIN/EKUL_PASSWORD usługa odświeżania nie startuje —
 # aplikacja działa normalnie na danych już na dysku.
 services:
@@ -14,7 +13,7 @@ services:
       # EKUL_PASSWORD: twoje-haslo
     volumes:
       # trwałość zebranych danych między restartami kontenera
-      - ./app/data/scraped:/app/app/data/scraped
+      - ./app/data/scraped:/lecture-chooser/app/data/scraped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
       interval: 30s
