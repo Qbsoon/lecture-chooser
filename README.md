@@ -52,7 +52,7 @@ EKUL_PASSWORD=moje-hasło
 
 ## Ustawienia scrapingu (`settings["scraping"]`)
 
-Sekja `scraping` w `app/data/settings.json` kontroluje wszystkie tempa,
+Sekcja `scraping` w `app/data/settings.json` kontroluje wszystkie tempa,
 limity i częstotliwości odświeżania (bez dotykania kodu):
 
 | klucz | domyślnie | opis |
