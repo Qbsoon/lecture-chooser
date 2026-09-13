@@ -158,6 +158,53 @@ html, body {
   font: 15px/1.45 system-ui, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
 }
 
+/* ---------- paski przewijania (cross-browser: Firefox + Chromium + Safari) ---------- */
+
+/* Firefox: scrollbar-width + scrollbar-color ustawiane na elemencie przewijanym.
+   Chromium / Safari: pseudoelementy ::-webkit-scrollbar poniżej. */
+
+.cal-scroll,
+.picker,
+.modal-body,
+.dropdown-sub.open .gcal-list {
+  scrollbar-width: thin;
+  scrollbar-color: var(--muted) transparent;
+}
+
+.cal-scroll::-webkit-scrollbar,
+.picker::-webkit-scrollbar,
+.modal-body::-webkit-scrollbar,
+.dropdown-sub.open .gcal-list::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.cal-scroll::-webkit-scrollbar-track,
+.picker::-webkit-scrollbar-track,
+.modal-body::-webkit-scrollbar-track,
+.dropdown-sub.open .gcal-list::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 999px;
+}
+
+.cal-scroll::-webkit-scrollbar-thumb,
+.picker::-webkit-scrollbar-thumb,
+.modal-body::-webkit-scrollbar-thumb,
+.dropdown-sub.open .gcal-list::-webkit-scrollbar-thumb {
+  background: var(--muted);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.cal-scroll::-webkit-scrollbar-thumb:hover,
+.picker::-webkit-scrollbar-thumb:hover,
+.modal-body::-webkit-scrollbar-thumb:hover,
+.dropdown-sub.open .gcal-list::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+  background-clip: padding-box;
+}
+
 /* ---------- pasek górny ---------- */
 
 .topbar {
@@ -751,6 +798,7 @@ details.dropdown { position: relative; }
 details.dropdown > summary {
   list-style: none;
   cursor: pointer;
+  -webkit-user-select: none;
   user-select: none;
   white-space: nowrap;
 }
