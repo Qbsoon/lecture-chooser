@@ -1,6 +1,6 @@
 {
-    "semester_start": "2026-10-05",
-    "semester_weeks": 15,
+    "semester_start": "2026-09-30",
+    "semester_weeks": 18,
     "scraping": {
         "base_url": "https://e.kul.pl",
         "request_delay": [2.0, 6.0],

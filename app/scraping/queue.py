@@ -283,7 +283,7 @@ class EkulRefresher:
             before = self._client.request_count if self._client else 0
             client = await self._ensure_client()
             try:
-                await scrape_course(client, wid, kid, self.data_dir)
+                await scrape_course(client, wid, kid, self.data_dir, overwrite=True)
             except LoginError:
                 total += client.request_count - before
                 if retried:

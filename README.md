@@ -99,8 +99,7 @@ Ustawienia (`settings.json`) leżą w katalogu `app/data/`.
 ## Ograniczenia wyboru (notki w tabeli planu)
 
 Jedynym źródłem ograniczeń są notki w wierszach pod nagłówkami sekcji w tabeli
-planu studiów (`plan.html`), rozpoznawane przez `parse_note`
-(`app/core/parsers.py`):
+planu studiów rozpoznawane przez `parse_note` (`app/core/parsers.py`):
 
 - „do wyboru 2 przedmioty” / „(należy wybrać 2 przedmioty)” — dokładnie 2 przedmioty,
 - „(należy wybrać 120 godz., 12 pkt. ECTS)” — dokładnie 120 godzin i 12 pkt. ECTS,
@@ -108,7 +107,7 @@ planu studiów (`plan.html`), rozpoznawane przez `parse_note`
 - „do wyboru 1 specjalność” — notka serii: wybierz 1 specjalność,
 - sekcja bez notki — bez ograniczeń liczby („brak limitu”).
 
-`settings.json` przechowuje już tylko parametry semestru (`semester_start`,
+`settings.json` przechowuje parametry semestru (`semester_start`,
 `semester_weeks`) oraz ustawienia scrapingu (sekcja `scraping`).
 
 ## API
