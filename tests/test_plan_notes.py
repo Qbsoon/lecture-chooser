@@ -18,6 +18,7 @@ from app.core.models import Offering
 from app.core.parsers import amount_from_note, parse_note, parse_plan_table
 from app.logic.constraints import evaluate
 
+REPO = Path(__file__).resolve().parent.parent
 FIX = Path(__file__).resolve().parent / "fixtures"
 OTHER = (FIX / "other_example.html").read_text(encoding="utf-8")
 OTHER2 = (FIX / "other_example_2.html").read_text(encoding="utf-8")

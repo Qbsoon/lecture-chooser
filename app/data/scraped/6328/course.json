@@ -1,9 +1,11 @@
 {
-  "etaps": [],
-  "fetched_at": "2026-09-04T00:04:15+00:00",
+  "etaps": [
+    3
+  ],
+  "fetched_at": "2026-09-13T21:53:36+00:00",
   "kid": 6328,
-  "last_updated": null,
+  "last_updated": "2026-09-13 17:21",
   "ra": 1,
-  "status": "no_data",
+  "status": "ok",
   "wid": 10
 }

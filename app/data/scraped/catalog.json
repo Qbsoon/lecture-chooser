@@ -2,13 +2,17 @@
   "10": {
     "courses": {
       "155": {
-        "etaps": [],
-        "last_refreshed": "2026-09-03T23:54:41+00:00",
+        "etaps": [
+          1
+        ],
+        "last_refreshed": "2026-09-13T22:05:56+00:00",
         "name": "Filologia Polska (stacjonarne II stopnia)"
       },
       "1842": {
-        "etaps": [],
-        "last_refreshed": "2026-09-03T23:58:27+00:00",
+        "etaps": [
+          3
+        ],
+        "last_refreshed": "2026-09-13T21:57:11+00:00",
         "name": "Filologia Angielska (stacjonarne II stopnia)"
       },
       "1843": {
@@ -17,8 +21,11 @@
         "name": "Filologia Germańska (stacjonarne II stopnia)"
       },
       "1844": {
-        "etaps": [],
-        "last_refreshed": "2026-09-03T23:58:39+00:00",
+        "etaps": [
+          1,
+          3
+        ],
+        "last_refreshed": "2026-09-13T21:49:52+00:00",
         "name": "Filologia Klasyczna (stacjonarne II stopnia)"
       },
       "1845": {
@@ -31,12 +38,12 @@
           1,
           3
         ],
-        "last_refreshed": "2026-09-03T23:58:52+00:00",
+        "last_refreshed": "2026-09-13T21:50:02+00:00",
         "name": "Historia (stacjonarne II stopnia)"
       },
       "1849": {
         "etaps": [],
-        "last_refreshed": "2026-09-03T23:59:02+00:00",
+        "last_refreshed": "2026-09-13T22:11:04+00:00",
         "name": "Historia Sztuki (stacjonarne II stopnia)"
       },
       "2109": {
@@ -47,19 +54,22 @@
       "2400": {
         "etaps": [
           1,
-          3
+          3,
+          5
         ],
-        "last_refreshed": "2026-09-03T23:59:11+00:00",
+        "last_refreshed": "2026-09-13T21:48:38+00:00",
         "name": "Edytorstwo (stacjonarne I stopnia)"
       },
       "3502": {
-        "etaps": [],
-        "last_refreshed": "2026-09-03T23:59:24+00:00",
+        "etaps": [
+          3
+        ],
+        "last_refreshed": "2026-09-13T21:55:32+00:00",
         "name": "Humanistyka cyfrowa (stacjonarne II stopnia)"
       },
       "352": {
         "etaps": [],
-        "last_refreshed": "2026-09-03T23:54:50+00:00",
+        "last_refreshed": "2026-09-13T21:38:29+00:00",
         "name": "Filologia Angielska (niestacjonarne II stopnia)"
       },
       "3682": {
@@ -67,7 +77,7 @@
           1,
           3
         ],
-        "last_refreshed": "2026-09-03T23:59:35+00:00",
+        "last_refreshed": "2026-09-13T21:45:55+00:00",
         "name": "Hispanistyka (stacjonarne I stopnia)"
       },
       "4141": {
@@ -75,40 +85,47 @@
           1,
           3
         ],
-        "last_refreshed": "2026-09-04T00:00:48+00:00",
+        "last_refreshed": "2026-09-13T21:57:56+00:00",
         "name": "Lingwistyka stosowana (stacjonarne I stopnia)"
       },
       "4401": {
         "etaps": [
           1,
-          3
+          3,
+          5
         ],
-        "last_refreshed": "2026-09-04T00:01:01+00:00",
+        "last_refreshed": "2026-09-13T22:07:53+00:00",
         "name": "Muzykologia (stacjonarne I stopnia)"
       },
       "4402": {
-        "etaps": [],
-        "last_refreshed": "2026-09-04T00:01:14+00:00",
+        "etaps": [
+          1
+        ],
+        "last_refreshed": "2026-09-13T21:43:59+00:00",
         "name": "Muzykologia (stacjonarne II stopnia)"
       },
       "4743": {
         "etaps": [
           3
         ],
-        "last_refreshed": "2026-09-04T00:01:24+00:00",
+        "last_refreshed": "2026-09-13T22:03:21+00:00",
         "name": "Italianistyka (stacjonarne I stopnia)"
       },
       "4803": {
         "etaps": [
           1,
-          3
+          3,
+          5
         ],
-        "last_refreshed": "2026-09-04T00:01:33+00:00",
+        "last_refreshed": "2026-09-13T22:05:38+00:00",
         "name": "Sinologia (stacjonarne I stopnia)"
       },
       "4804": {
-        "etaps": [],
-        "last_refreshed": "2026-09-04T00:01:46+00:00",
+        "etaps": [
+          1,
+          3
+        ],
+        "last_refreshed": "2026-09-13T21:43:21+00:00",
         "name": "Sinologia (stacjonarne II stopnia)"
       },
       "495": {
@@ -116,22 +133,24 @@
           1,
           3
         ],
-        "last_refreshed": "2026-09-03T23:56:00+00:00",
+        "last_refreshed": "2026-09-13T22:10:21+00:00",
         "name": "Filologia Angielska (stacjonarne I stopnia)"
       },
       "497": {
         "etaps": [
-          3
+          3,
+          5
         ],
-        "last_refreshed": "2026-09-03T23:56:14+00:00",
+        "last_refreshed": "2026-09-13T21:45:30+00:00",
         "name": "Filologia Klasyczna (stacjonarne I stopnia)"
       },
       "498": {
         "etaps": [
           1,
-          3
+          3,
+          5
         ],
-        "last_refreshed": "2026-09-03T23:56:27+00:00",
+        "last_refreshed": "2026-09-13T21:48:04+00:00",
         "name": "Filologia Polska (stacjonarne I stopnia)"
       },
       "502": {
@@ -140,25 +159,28 @@
           3,
           5
         ],
-        "last_refreshed": "2026-09-03T23:56:39+00:00",
+        "last_refreshed": "2026-09-13T21:40:15+00:00",
         "name": "Historia (stacjonarne I stopnia)"
       },
       "503": {
         "etaps": [
           1,
-          3
+          3,
+          5
         ],
-        "last_refreshed": "2026-09-03T23:56:53+00:00",
+        "last_refreshed": "2026-09-13T21:43:03+00:00",
         "name": "Historia Sztuki (stacjonarne I stopnia)"
       },
       "530": {
         "etaps": [],
-        "last_refreshed": "2026-09-03T23:57:05+00:00",
+        "last_refreshed": "2026-09-13T21:52:58+00:00",
         "name": "Filologia Angielska (niestacjonarne I stopnia)"
       },
       "5323": {
-        "etaps": [],
-        "last_refreshed": "2026-09-04T00:01:57+00:00",
+        "etaps": [
+          3
+        ],
+        "last_refreshed": "2026-09-13T21:55:09+00:00",
         "name": "Lingwistyka stosowana (stacjonarne II stopnia)"
       },
       "5743": {
@@ -166,24 +188,26 @@
           1,
           3
         ],
-        "last_refreshed": "2026-09-04T00:03:07+00:00",
+        "last_refreshed": "2026-09-13T21:38:17+00:00",
         "name": "Italianistyka - grupa hybrydowa (stacjonarne I stopnia)"
       },
       "5784": {
         "etaps": [],
-        "last_refreshed": "2026-09-04T00:03:21+00:00",
+        "last_refreshed": "2026-09-13T21:46:07+00:00",
         "name": "Romanistyka (stacjonarne I stopnia)"
       },
       "5804": {
         "etaps": [
           1
         ],
-        "last_refreshed": "2026-09-04T00:03:27+00:00",
+        "last_refreshed": "2026-09-13T21:46:14+00:00",
         "name": "Germanistyka (stacjonarne I stopnia)"
       },
       "5867": {
-        "etaps": [],
-        "last_refreshed": "2026-09-04T00:03:38+00:00",
+        "etaps": [
+          3
+        ],
+        "last_refreshed": "2026-09-13T22:02:51+00:00",
         "name": "Hispanistyka (stacjonarne II stopnia)"
       },
       "5911": {
@@ -191,12 +215,15 @@
           1,
           3
         ],
-        "last_refreshed": "2026-09-04T00:03:47+00:00",
+        "last_refreshed": "2026-09-13T21:45:43+00:00",
         "name": "Romanistyka - grupa hybrydowa (stacjonarne I stopnia)"
       },
       "5912": {
-        "etaps": [],
-        "last_refreshed": "2026-09-04T00:03:59+00:00",
+        "etaps": [
+          1,
+          3
+        ],
+        "last_refreshed": "2026-09-13T22:05:04+00:00",
         "name": "Italianistyka (stacjonarne II stopnia)"
       },
       "5926": {
@@ -210,15 +237,17 @@
         "name": "Studia podyplomowe w zakresie historii i edukacji obywatelskiej/wiedzy o społeczeństwie (kwalifikacyjne)"
       },
       "6328": {
-        "etaps": [],
-        "last_refreshed": "2026-09-04T00:04:15+00:00",
+        "etaps": [
+          3
+        ],
+        "last_refreshed": "2026-09-13T21:53:36+00:00",
         "name": "Romanistyka (stacjonarne II stopnia)"
       },
       "830": {
         "etaps": [
           1
         ],
-        "last_refreshed": "2026-09-03T23:57:19+00:00",
+        "last_refreshed": "2026-09-13T21:38:38+00:00",
         "name": "Filologia Niderlandzka (stacjonarne I stopnia)"
       }
     },
@@ -228,12 +257,12 @@
     "courses": {
       "1400": {
         "etaps": [],
-        "last_refreshed": "2026-09-03T23:44:21+00:00",
+        "last_refreshed": "2026-09-13T21:54:46+00:00",
         "name": "Teologia kurs A-WSD Kielce (stacjonarne jednolite magisterskie)"
       },
       "1841": {
         "etaps": [],
-        "last_refreshed": "2026-09-03T23:44:43+00:00",
+        "last_refreshed": "2026-09-13T21:50:22+00:00",
         "name": "Nauki o rodzinie (stacjonarne II stopnia)"
       },
       "27": {
@@ -242,7 +271,7 @@
           9,
           11
         ],
-        "last_refreshed": "2026-09-03T23:42:16+00:00",
+        "last_refreshed": "2026-09-13T21:37:38+00:00",
         "name": "Teologia kurs A-MSD Lublin (stacjonarne jednolite magisterskie)"
       },
       "28": {
@@ -253,12 +282,12 @@
           7,
           9
         ],
-        "last_refreshed": "2026-09-03T23:42:39+00:00",
+        "last_refreshed": "2026-09-13T22:07:34+00:00",
         "name": "Teologia kurs B (stacjonarne jednolite magisterskie)"
       },
       "2901": {
         "etaps": [],
-        "last_refreshed": "2026-09-03T23:44:54+00:00",
+        "last_refreshed": "2026-09-13T21:52:31+00:00",
         "name": "Teologia kurs A-WSD Radom (stacjonarne jednolite magisterskie)"
       },
       "4223": {
@@ -268,7 +297,7 @@
       },
       "4421": {
         "etaps": [],
-        "last_refreshed": "2026-09-03T23:45:18+00:00",
+        "last_refreshed": "2026-09-13T21:55:42+00:00",
         "name": "Nauki o rodzinie (stacjonarne I stopnia)"
       },
       "4461": {
@@ -276,14 +305,14 @@
           1,
           3
         ],
-        "last_refreshed": "2026-09-03T23:46:31+00:00",
+        "last_refreshed": "2026-09-13T22:05:14+00:00",
         "name": "Teologiczne Studium Licencjackie"
       },
       "4462": {
         "etaps": [
           1
         ],
-        "last_refreshed": "2026-09-03T23:46:40+00:00",
+        "last_refreshed": "2026-09-13T22:03:02+00:00",
         "name": "Kurs propedeutyczny w zakresie języków biblijnych"
       },
       "5405": {
@@ -306,7 +335,7 @@
           1,
           3
         ],
-        "last_refreshed": "2026-09-03T23:46:58+00:00",
+        "last_refreshed": "2026-09-13T22:06:06+00:00",
         "name": "Duchowość i coaching (stacjonarne I stopnia)"
       },
       "5970": {
@@ -314,7 +343,7 @@
           1,
           3
         ],
-        "last_refreshed": "2026-09-03T23:47:07+00:00",
+        "last_refreshed": "2026-09-13T21:57:34+00:00",
         "name": "Studia biblijne (stacjonarne I stopnia)"
       },
       "5977": {
@@ -322,7 +351,7 @@
           1,
           3
         ],
-        "last_refreshed": "2026-09-03T23:47:16+00:00",
+        "last_refreshed": "2026-09-13T21:58:13+00:00",
         "name": "Interdyscyplinarne Studia nad Małżeństwem i Rodziną (stacjonarne II stopnia)"
       },
       "6035": {
@@ -337,12 +366,12 @@
       },
       "62": {
         "etaps": [],
-        "last_refreshed": "2026-09-03T23:42:58+00:00",
+        "last_refreshed": "2026-09-13T22:00:48+00:00",
         "name": "Teologia kurs A-WSD Sandomierz (stacjonarne jednolite magisterskie)"
       },
       "6329": {
         "etaps": [],
-        "last_refreshed": "2026-09-03T23:47:32+00:00",
+        "last_refreshed": "2026-09-13T22:08:21+00:00",
         "name": "Interdyscyplinarne Studia nad Małżeństwem i Rodziną (stacjonarne I stopnia)"
       }
     },
@@ -355,12 +384,12 @@
           1,
           3
         ],
-        "last_refreshed": "2026-09-04T00:04:24+00:00",
+        "last_refreshed": "2026-09-13T21:42:33+00:00",
         "name": "Międzyobszarowe Indywidualne Studia Humanistyczno-Społeczne (stacjonarne I stopnia)"
       },
       "2601": {
         "etaps": [],
-        "last_refreshed": "2026-09-04T00:05:36+00:00",
+        "last_refreshed": "2026-09-13T21:48:31+00:00",
         "name": "Międzyobszarowe Indywidualne Studia Humanistyczno-Społeczne (stacjonarne II stopnia)"
       }
     },
@@ -385,19 +414,20 @@
     "courses": {
       "5816": {
         "etaps": [
+          1,
           3
         ],
-        "last_refreshed": "2026-09-04T00:05:49+00:00",
+        "last_refreshed": "2026-09-13T21:57:43+00:00",
         "name": "Położnictwo (stacjonarne I stopnia)"
       },
       "5819": {
         "etaps": [],
-        "last_refreshed": "2026-09-04T00:06:02+00:00",
+        "last_refreshed": "2026-09-13T22:09:45+00:00",
         "name": "Pielęgniarstwo (stacjonarne I stopnia)"
       },
       "5822": {
         "etaps": [],
-        "last_refreshed": "2026-09-04T00:06:14+00:00",
+        "last_refreshed": "2026-09-13T22:07:24+00:00",
         "name": "Pielęgniarstwo (stacjonarne II stopnia)"
       },
       "5831": {
@@ -406,12 +436,14 @@
           3,
           5
         ],
-        "last_refreshed": "2026-09-04T00:06:23+00:00",
+        "last_refreshed": "2026-09-13T21:53:12+00:00",
         "name": "Biotechnologia (stacjonarne I stopnia)"
       },
       "5832": {
-        "etaps": [],
-        "last_refreshed": "2026-09-04T00:06:36+00:00",
+        "etaps": [
+          3
+        ],
+        "last_refreshed": "2026-09-13T21:40:28+00:00",
         "name": "Biotechnologia (stacjonarne II stopnia)"
       },
       "5833": {
@@ -421,34 +453,34 @@
       },
       "5834": {
         "etaps": [],
-        "last_refreshed": "2026-09-04T00:06:46+00:00",
+        "last_refreshed": "2026-09-13T21:47:53+00:00",
         "name": "Biotechnologia - grupa w języku angielskim (stacjonarne II stopnia)"
       },
       "5848": {
         "etaps": [],
-        "last_refreshed": "2026-09-04T00:07:53+00:00",
+        "last_refreshed": "2026-09-13T21:55:17+00:00",
         "name": "Kierunek lekarski (stacjonarne jednolite magisterskie)"
       },
       "5974": {
         "etaps": [],
-        "last_refreshed": "2026-09-04T00:08:10+00:00",
+        "last_refreshed": "2026-09-13T22:07:16+00:00",
         "name": "Położnictwo (stacjonarne II stopnia)"
       },
       "6332": {
         "etaps": [],
-        "last_refreshed": "2026-09-04T00:08:19+00:00",
+        "last_refreshed": "2026-09-13T22:03:35+00:00",
         "name": "Biotechnologia medyczna (stacjonarne II stopnia)"
       },
       "6335": {
         "etaps": [],
-        "last_refreshed": "2026-09-04T00:08:25+00:00",
+        "last_refreshed": "2026-09-13T21:52:52+00:00",
         "name": "Biomedycyna i środowisko (stacjonarne I stopnia)"
       },
       "6361": {
         "etaps": [
           1
         ],
-        "last_refreshed": "2026-09-04T00:08:32+00:00",
+        "last_refreshed": "2026-09-13T22:03:13+00:00",
         "name": "Medycyna stylu życia (stacjonarne I stopnia)"
       }
     },
@@ -462,7 +494,7 @@
           3,
           5
         ],
-        "last_refreshed": "2026-09-04T00:08:39+00:00",
+        "last_refreshed": "2026-09-13T21:50:40+00:00",
         "name": "Bezpieczeństwo narodowe (stacjonarne I stopnia) WNSiT"
       },
       "6050": {
@@ -475,7 +507,7 @@
           1,
           3
         ],
-        "last_refreshed": "2026-09-04T00:08:57+00:00",
+        "last_refreshed": "2026-09-13T21:37:28+00:00",
         "name": "Bezpieczeństwo narodowe (stacjonarne II stopnia) WNSiT"
       },
       "6052": {
@@ -483,14 +515,14 @@
           1,
           5
         ],
-        "last_refreshed": "2026-09-04T00:09:08+00:00",
+        "last_refreshed": "2026-09-13T22:00:24+00:00",
         "name": "Coaching i doradztwo kariery (stacjonarne I stopnia) WNSiT"
       },
       "6054": {
         "etaps": [
           5
         ],
-        "last_refreshed": "2026-09-04T00:10:17+00:00",
+        "last_refreshed": "2026-09-13T22:00:42+00:00",
         "name": "Dziennikarstwo i komunikacja społeczna - grupa w języku angielskim (stacjonarne I stopnia) WNSiT"
       },
       "6055": {
@@ -499,7 +531,7 @@
           3,
           5
         ],
-        "last_refreshed": "2026-09-04T00:10:23+00:00",
+        "last_refreshed": "2026-09-13T22:03:42+00:00",
         "name": "Dziennikarstwo i komunikacja społeczna (stacjonarne I stopnia) WNSiT"
       },
       "6056": {
@@ -507,7 +539,7 @@
           1,
           3
         ],
-        "last_refreshed": "2026-09-04T00:10:35+00:00",
+        "last_refreshed": "2026-09-13T22:04:55+00:00",
         "name": "Dziennikarstwo i komunikacja społeczna (stacjonarne II stopnia) WNSiT"
       },
       "6057": {
@@ -516,7 +548,7 @@
           3,
           5
         ],
-        "last_refreshed": "2026-09-04T00:10:44+00:00",
+        "last_refreshed": "2026-09-13T21:52:18+00:00",
         "name": "Ekonomia (stacjonarne I stopnia) WNSiT"
       },
       "6058": {
@@ -524,7 +556,7 @@
           1,
           3
         ],
-        "last_refreshed": "2026-09-04T00:10:58+00:00",
+        "last_refreshed": "2026-09-13T21:37:18+00:00",
         "name": "Ekonomia (stacjonarne II stopnia) WNSiT"
       },
       "6059": {
@@ -533,7 +565,7 @@
           3,
           5
         ],
-        "last_refreshed": "2026-09-04T00:11:06+00:00",
+        "last_refreshed": "2026-09-13T21:57:21+00:00",
         "name": "Kryminologia (stacjonarne I stopnia) WNSiT"
       },
       "6060": {
@@ -541,7 +573,7 @@
           1,
           3
         ],
-        "last_refreshed": "2026-09-04T00:11:21+00:00",
+        "last_refreshed": "2026-09-13T22:08:06+00:00",
         "name": "Kryminologia (stacjonarne II stopnia) WNSiT"
       },
       "6062": {
@@ -552,7 +584,7 @@
           7,
           9
         ],
-        "last_refreshed": "2026-09-04T00:12:30+00:00",
+        "last_refreshed": "2026-09-13T22:02:33+00:00",
         "name": "Pedagogika przedszkolna i wczesnoszkolna (stacjonarne jednolite magisterskie) WNSiT"
       },
       "6064": {
@@ -561,14 +593,15 @@
           3,
           5
         ],
-        "last_refreshed": "2026-09-04T00:12:49+00:00",
+        "last_refreshed": "2026-09-13T21:47:23+00:00",
         "name": "Pedagogika (stacjonarne I stopnia) WNSiT"
       },
       "6068": {
         "etaps": [
+          1,
           3
         ],
-        "last_refreshed": "2026-09-04T00:13:02+00:00",
+        "last_refreshed": "2026-09-13T21:50:12+00:00",
         "name": "Pedagogika (stacjonarne II stopnia) WNSiT"
       },
       "6069": {
@@ -576,7 +609,7 @@
           1,
           3
         ],
-        "last_refreshed": "2026-09-04T00:13:12+00:00",
+        "last_refreshed": "2026-09-13T22:10:08+00:00",
         "name": "Praca socjalna i ekonomia społeczna (stacjonarne II stopnia) WNSiT"
       },
       "6070": {
@@ -584,7 +617,7 @@
           1,
           5
         ],
-        "last_refreshed": "2026-09-04T00:13:22+00:00",
+        "last_refreshed": "2026-09-13T22:12:42+00:00",
         "name": "Praca socjalna (stacjonarne I stopnia) WNSiT"
       },
       "6072": {
@@ -595,7 +628,7 @@
           7,
           9
         ],
-        "last_refreshed": "2026-09-04T00:13:31+00:00",
+        "last_refreshed": "2026-09-13T22:12:23+00:00",
         "name": "Psychologia (stacjonarne jednolite magisterskie) WNSiT"
       },
       "6073": {
@@ -603,19 +636,19 @@
           1,
           3
         ],
-        "last_refreshed": "2026-09-04T00:14:50+00:00",
+        "last_refreshed": "2026-09-13T22:10:33+00:00",
         "name": "Socjologia (stacjonarne I stopnia) WNSiT"
       },
       "6074": {
         "etaps": [
           1
         ],
-        "last_refreshed": "2026-09-04T00:15:01+00:00",
+        "last_refreshed": "2026-09-13T22:02:17+00:00",
         "name": "Socjologia (stacjonarne II stopnia) WNSiT"
       },
       "6075": {
         "etaps": [],
-        "last_refreshed": "2026-09-04T00:15:08+00:00",
+        "last_refreshed": "2026-09-13T21:40:47+00:00",
         "name": "Stosunki międzynarodowe - grupa w języku angielskim (stacjonarne II stopnia)_ profil ogólnoakademicki WNSiT"
       },
       "6077": {
@@ -624,7 +657,7 @@
           3,
           5
         ],
-        "last_refreshed": "2026-09-04T00:15:14+00:00",
+        "last_refreshed": "2026-09-13T21:51:06+00:00",
         "name": "Stosunki międzynarodowe (stacjonarne I stopnia) WNSiT"
       },
       "6078": {
@@ -632,7 +665,7 @@
           1,
           3
         ],
-        "last_refreshed": "2026-09-04T00:15:27+00:00",
+        "last_refreshed": "2026-09-13T22:00:33+00:00",
         "name": "Stosunki międzynarodowe (stacjonarne II stopnia)_ profil ogólnoakademicki WNSiT"
       },
       "6081": {
@@ -641,7 +674,7 @@
           3,
           5
         ],
-        "last_refreshed": "2026-09-04T00:15:37+00:00",
+        "last_refreshed": "2026-09-13T22:08:33+00:00",
         "name": "Zarządzanie (stacjonarne I stopnia) WNSiT"
       },
       "6082": {
@@ -649,20 +682,24 @@
           1,
           3
         ],
-        "last_refreshed": "2026-09-04T00:15:49+00:00",
+        "last_refreshed": "2026-09-13T21:38:09+00:00",
         "name": "Zarządzanie (stacjonarne II stopnia) WNSiT"
       },
       "6083": {
         "etaps": [
+          1,
           3,
-          5
+          5,
+          7
         ],
-        "last_refreshed": "2026-09-04T00:15:59+00:00",
+        "last_refreshed": "2026-09-13T21:42:49+00:00",
         "name": "Architektura Krajobrazu (stacjonarne I stopnia) 7 WNSiT"
       },
       "6084": {
-        "etaps": [],
-        "last_refreshed": "2026-09-04T00:17:13+00:00",
+        "etaps": [
+          2
+        ],
+        "last_refreshed": "2026-09-13T21:47:36+00:00",
         "name": "Architektura Krajobrazu (stacjonarne II stopnia) L WNSiT"
       },
       "6085": {
@@ -670,12 +707,12 @@
           1,
           3
         ],
-        "last_refreshed": "2026-09-04T00:17:21+00:00",
+        "last_refreshed": "2026-09-13T22:05:24+00:00",
         "name": "Informatyka - grupa w języku angielskim (stacjonarne I stopnia) WNSiT"
       },
       "6086": {
         "etaps": [],
-        "last_refreshed": "2026-09-04T00:17:30+00:00",
+        "last_refreshed": "2026-09-13T21:39:51+00:00",
         "name": "Informatyka - grupa w języku angielskim (stacjonarne II stopnia) WNSiT"
       },
       "6087": {
@@ -684,7 +721,7 @@
           3,
           5
         ],
-        "last_refreshed": "2026-09-04T00:17:36+00:00",
+        "last_refreshed": "2026-09-13T21:50:53+00:00",
         "name": "Informatyka (stacjonarne I stopnia) WNSiT"
       },
       "6089": {
@@ -692,17 +729,18 @@
           1,
           3
         ],
-        "last_refreshed": "2026-09-03T23:34:29+00:00",
+        "last_refreshed": "2026-09-13T22:00:05+00:00",
         "name": "Informatyka (stacjonarne II stopnia) WNSiT"
       },
       "6090": {
         "etaps": [
           1,
           3,
+          5,
           7,
           9
         ],
-        "last_refreshed": "2026-09-04T00:17:49+00:00",
+        "last_refreshed": "2026-09-13T21:45:10+00:00",
         "name": "Pedagogika specjalna (stacjonarne jednolite magisterskie) WNSiT"
       },
       "6096": {
@@ -722,7 +760,7 @@
       },
       "6330": {
         "etaps": [],
-        "last_refreshed": "2026-09-04T00:18:17+00:00",
+        "last_refreshed": "2026-09-13T21:59:54+00:00",
         "name": "Polityka-Gospodarka-Transformacja cyfrowa (stacjonarne I stopnia)"
       }
     },
@@ -759,14 +797,14 @@
           1,
           3
         ],
-        "last_refreshed": "2026-09-03T23:49:50+00:00",
+        "last_refreshed": "2026-09-13T21:41:11+00:00",
         "name": "Administracja (stacjonarne II stopnia)"
       },
       "1900": {
         "etaps": [
           9
         ],
-        "last_refreshed": "2026-09-03T23:50:02+00:00",
+        "last_refreshed": "2026-09-13T22:10:02+00:00",
         "name": "Prawo Kanoniczne (niestacjonarne jednolite magisterskie)"
       },
       "1925": {
@@ -784,7 +822,7 @@
           1,
           3
         ],
-        "last_refreshed": "2026-09-03T23:50:17+00:00",
+        "last_refreshed": "2026-09-13T22:00:15+00:00",
         "name": "Prawo w biznesie (stacjonarne II stopnia)"
       },
       "3362": {
@@ -798,7 +836,7 @@
           3,
           5
         ],
-        "last_refreshed": "2026-09-03T23:49:19+00:00",
+        "last_refreshed": "2026-09-13T22:11:10+00:00",
         "name": "Administracja (stacjonarne I stopnia)"
       },
       "48": {
@@ -809,7 +847,7 @@
           7,
           9
         ],
-        "last_refreshed": "2026-09-03T23:47:38+00:00",
+        "last_refreshed": "2026-09-13T22:10:44+00:00",
         "name": "Prawo (stacjonarne jednolite magisterskie)"
       },
       "49": {
@@ -820,7 +858,7 @@
           7,
           9
         ],
-        "last_refreshed": "2026-09-03T23:48:59+00:00",
+        "last_refreshed": "2026-09-13T21:59:37+00:00",
         "name": "Prawo Kanoniczne (stacjonarne jednolite magisterskie)"
       },
       "5423": {
@@ -836,7 +874,7 @@
           7,
           9
         ],
-        "last_refreshed": "2026-09-03T23:49:32+00:00",
+        "last_refreshed": "2026-09-13T21:43:31+00:00",
         "name": "Prawo (niestacjonarne jednolite magisterskie)"
       },
       "5663": {
@@ -850,7 +888,7 @@
           3,
           5
         ],
-        "last_refreshed": "2026-09-03T23:51:35+00:00",
+        "last_refreshed": "2026-09-13T21:40:53+00:00",
         "name": "Prawo w biznesie (stacjonarne I stopnia)"
       },
       "5808": {
@@ -878,7 +916,7 @@
           1,
           3
         ],
-        "last_refreshed": "2026-09-03T23:52:03+00:00",
+        "last_refreshed": "2026-09-13T21:55:59+00:00",
         "name": "European and International Legal Studies (stacjonarne I stopnia)"
       },
       "5987": {
@@ -890,7 +928,7 @@
         "etaps": [
           1
         ],
-        "last_refreshed": "2026-09-03T23:52:14+00:00",
+        "last_refreshed": "2026-09-13T21:53:24+00:00",
         "name": "European and International Law (stacjonarne II stopnia)"
       }
     },
@@ -903,7 +941,7 @@
           1,
           3
         ],
-        "last_refreshed": "2026-09-03T23:52:22+00:00",
+        "last_refreshed": "2026-09-13T21:47:43+00:00",
         "name": "Filozofia (stacjonarne II stopnia)"
       },
       "1860": {
@@ -912,7 +950,7 @@
           3,
           5
         ],
-        "last_refreshed": "2026-09-03T23:52:31+00:00",
+        "last_refreshed": "2026-09-13T21:41:21+00:00",
         "name": "Filozofia (stacjonarne I stopnia)"
       },
       "2987": {
@@ -921,7 +959,7 @@
           3,
           5
         ],
-        "last_refreshed": "2026-09-03T23:53:45+00:00",
+        "last_refreshed": "2026-09-13T21:48:18+00:00",
         "name": "Kognitywistyka (stacjonarne I stopnia)"
       },
       "3683": {
@@ -929,12 +967,14 @@
           1,
           3
         ],
-        "last_refreshed": "2026-09-03T23:53:58+00:00",
+        "last_refreshed": "2026-09-13T21:58:23+00:00",
         "name": "Kognitywistyka (stacjonarne II stopnia)"
       },
       "4081": {
-        "etaps": [],
-        "last_refreshed": "2026-09-03T23:54:08+00:00",
+        "etaps": [
+          3
+        ],
+        "last_refreshed": "2026-09-13T22:12:52+00:00",
         "name": "Retoryka stosowana (stacjonarne II stopnia)"
       },
       "4382": {
@@ -948,12 +988,12 @@
           3,
           5
         ],
-        "last_refreshed": "2026-09-03T23:54:22+00:00",
+        "last_refreshed": "2026-09-13T21:40:34+00:00",
         "name": "Sztuczna Inteligencja (stacjonarne I stopnia)"
       },
       "5940": {
         "etaps": [],
-        "last_refreshed": "2026-09-03T23:54:36+00:00",
+        "last_refreshed": "2026-09-13T21:43:15+00:00",
         "name": "Przywództwo i Retoryka (stacjonarne I stopnia)"
       }
     },
