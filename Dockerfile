@@ -16,4 +16,4 @@ RUN cp -a app/data/scraped /opt/scraped-backup \
  && chmod +x docker-entrypoint.sh
 
 ENTRYPOINT ["./docker-entrypoint.sh"]
-CMD ["hypercorn", "--bind", "0.0.0.0:8000", "app:app"]
+CMD ["hypercorn", "--bind", "0.0.0.0:8000", "asgi:app"]
