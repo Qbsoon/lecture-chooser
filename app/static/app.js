@@ -1763,6 +1763,33 @@ function initDownloadMenu() {
   });
 }
 
+/* ---------- pop-up kalendarium ---------- */
+
+let calendaryLoaded = false;
+
+async function openCalendary() {
+  const modal = $("calendaryModal");
+  const body = $("calendaryBody");
+  modal.hidden = false;
+  document.body.style.overflow = "hidden";
+  if (!calendaryLoaded) {
+    body.textContent = "Ładowanie kalendarium…";
+    try {
+      const res = await fetch("/api/calendary");
+      if (!res.ok) throw new Error(String(res.status));
+      body.innerHTML = await res.text();
+      calendaryLoaded = true;
+    } catch (err) {
+      body.textContent = "Nie udało się pobrać kalendarium.";
+    }
+  }
+}
+
+function closeCalendary() {
+  $("calendaryModal").hidden = true;
+  document.body.style.overflow = "";
+}
+
 /* ---------- render i zapis ---------- */
 
 function render() {
@@ -1889,6 +1916,17 @@ async function init() {
     } catch (err) {
       toast("Brak połączenia z serwerem.");
     }
+  });
+
+  // pop-up kalendarium: otwarcie przyciskiem, zamknięcie × / klik poza
+  // kartą / Esc; treść pobierana raz i zapamiętywana w sesji.
+  $("calendaryBtn").addEventListener("click", openCalendary);
+  $("calendaryClose").addEventListener("click", closeCalendary);
+  $("calendaryModal").addEventListener("click", (ev) => {
+    if (ev.target === ev.currentTarget) closeCalendary();
+  });
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && !$("calendaryModal").hidden) closeCalendary();
   });
 }
 

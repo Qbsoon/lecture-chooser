@@ -13,6 +13,7 @@
       <span class="subtitle">kalendarz + wybór przedmiotów</span>
     </div>
     <div class="topbar-actions">
+      <button class="btn" id="calendaryBtn" type="button" title="Kalendarium roku akademickiego 2026/2027">Kalendarium</button>
       <div class="week-switch" id="weekSwitch" role="group" aria-label="Wybór tygodnia"></div>
       <select class="theme-select" id="themeSelect" aria-label="Motyw kolorystyczny" title="Motyw kolorystyczny strony">
         <option value="auto">Motyw: auto</option>
@@ -82,8 +83,18 @@
 
   <div id="toast" class="toast" role="alert" hidden></div>
 
+  <div class="modal-overlay" id="calendaryModal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="calendaryTitle">
+      <div class="modal-head">
+        <h2 id="calendaryTitle">Kalendarium roku akademickiego 2026/2027</h2>
+        <button class="modal-close" id="calendaryClose" type="button" aria-label="Zamknij kalendarium" title="Zamknij">×</button>
+      </div>
+      <div class="modal-body" id="calendaryBody"></div>
+    </div>
+  </div>
+
   <footer class="site-footer">
-    <span>Częściowo generowane przy użyciu GLM-5.2</span>
+    <span>Tworzenie wspomagał model GLM-5.2</span>
     <a href="https://git.qbsoon.pl/Qbsoon/lecture-chooser" target="_blank" rel="noopener">Gitea</a>
     <a href="https://github.com/Qbsoon/lecture-chooser" target="_blank" rel="noopener">GitHub</a>
   </footer>

@@ -128,6 +128,24 @@ def test_put_ignores_unknown_zids():
     run(scenario())
 
 
+def test_calendary_html():
+    app = _app()
+
+    async def scenario():
+        async with app.test_client() as client:
+            res = await client.get("/api/calendary")
+            assert res.status_code == 200
+            assert res.content_type.startswith("text/html")
+            body = (await res.get_data()).decode()
+            # treść kalendarium roku akademickiego 2026/2027
+            assert "Kalendarium" in body
+            assert "2026/2027" in body
+            # zwracany fragment (wnętrze .col-md-9), nie pełny dokument <html>
+            assert "<html" not in body
+
+    run(scenario())
+
+
 def test_selection_pdf_ok():
     """Endpoint PDF z działającym (zamockowanym) rendererem serwerowym."""
     app = _app()

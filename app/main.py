@@ -1,6 +1,9 @@
 """Trasy aplikacji: strona główna + API."""
 from __future__ import annotations
 
+from pathlib import Path
+
+from bs4 import BeautifulSoup
 from quart import Blueprint, Response, current_app, jsonify, render_template, request
 
 from .logic.constraints import evaluate, implicit_zids
@@ -134,6 +137,23 @@ async def api_health() -> dict:
         "requests_today": state.requests_today,
         "last_weekly": state.last_weekly,
     })
+
+
+@bp.route("/api/calendary")
+async def api_calendary() -> Response:
+    """Treść kalendarium roku akademickiego (app/data/calendary.html).
+
+    Zwraca wnętrze bloku ``.col-md-9`` jako HTML — gotowy fragment do
+    wstawienia w pop-upie front-endu. Gdy w pliku nie ma ``.col-md-9``,
+    oddaje całą sparsowaną treść (aż do napotkania sensownego pojemnika).
+    """
+    path = Path(__file__).resolve().parent / "data" / "calendary.html"
+    if not path.is_file():
+        return jsonify({"error": "Brak pliku kalendarium"}), 404
+    soup = BeautifulSoup(path.read_text(encoding="utf-8"), "lxml")
+    node = soup.select_one(".col-md-9")
+    html = node.decode_contents() if node else soup.decode()
+    return Response(html, content_type="text/html; charset=utf-8")
 
 
 def _course_pair(kid: int | None, etap: int | None) -> tuple[int, int] | None:

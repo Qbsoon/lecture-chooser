@@ -221,6 +221,78 @@ html, body {
   color: var(--danger);
 }
 
+/* ---------- pop-up kalendarium ---------- */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgb(15 23 42 / 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 20px;
+}
+
+.modal-overlay[hidden] { display: none; }
+
+.modal-card {
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 40px rgb(0 0 0 / 0.3);
+  max-width: 720px;
+  width: 100%;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-head h2 { margin: 0; font-size: 1.05rem; }
+
+.modal-close {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 8px;
+  width: 32px;
+  height: 32px;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.modal-close:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.modal-body {
+  padding: 18px 22px 24px;
+  overflow-y: auto;
+  line-height: 1.5;
+}
+
+.modal-body p { margin: 0.45em 0; }
+.modal-body ul { margin: 0.3em 0 0.7em; padding-left: 1.3em; }
+.modal-body li { margin: 0.2em 0; }
+.modal-body strong { color: var(--text); }
+/* tytuł widnieje w nagłówku pop-upu — ukrywamy duplikat z treści */
+.modal-body h2 { display: none; }
+
 /* wybór motywu kolorystycznego */
 
 .theme-select {
@@ -771,7 +843,7 @@ details.dropdown[open] > summary { border-color: var(--accent); background: var(
     --grid-line: #e2e8f0;
   }
 
-  .topbar, #courseBar, #statusPanel, .picker, #toast, .site-footer { display: none !important; }
+  .topbar, #courseBar, #statusPanel, .picker, #toast, #calendaryModal, .site-footer { display: none !important; }
 
   .layout { display: block; padding: 0; }
 
