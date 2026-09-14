@@ -526,7 +526,7 @@ html, body {
 
 .cal-body {
   position: relative;
-  height: clamp(430px, 68vh, 900px);
+  height: clamp(430px, 68vh, 900px); /* dopasowywana przez JS (fitCalBodyHeight) */
   --hours: 12;
 }
 

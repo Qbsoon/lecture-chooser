@@ -765,6 +765,26 @@ function renderCalendar() {
     }
     body.append(dayEl);
   }
+
+  fitCalBodyHeight();
+}
+
+// Wysokość .cal-body: tyle, by każdy kafelek pomieścił całą treść
+// (top/height kafelków są w % wysokości .cal-body, czyli w osi godzin).
+function fitCalBodyHeight() {
+  const body = $("calBody");
+  if (!body) return;
+  const blocks = body.querySelectorAll(".cal-block:not(.preview)");
+  let minBodyPx = 0;
+  for (const block of blocks) {
+    const heightPct = parseFloat(block.style.height);
+    if (heightPct > 0) {
+      minBodyPx = Math.max(minBodyPx, block.scrollHeight / (heightPct / 100));
+    }
+  }
+  // clamp(430px, 68vh, 900px) — jak w CSS .cal-body
+  const clampH = Math.max(430, Math.min(900, window.innerHeight * 0.68));
+  body.style.height = Math.ceil(Math.max(clampH, minBodyPx)) + "px";
 }
 
 function flashCourse(courseId) {
@@ -1894,6 +1914,13 @@ async function init() {
   if (printMedia.addEventListener) {
     printMedia.addEventListener("change", (e) => (e.matches ? fitPrintOnePage() : resetPrintZoom()));
   }
+
+  // po resize inaczej zawija się tekst w kafelkach
+  let resizeTimer = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(fitCalBodyHeight, 100);
+  });
 
   $("shareBtn").addEventListener("click", sharePlan);
 
