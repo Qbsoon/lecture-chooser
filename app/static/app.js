@@ -774,17 +774,19 @@ function renderCalendar() {
 function fitCalBodyHeight() {
   const body = $("calBody");
   if (!body) return;
-  const blocks = body.querySelectorAll(".cal-block:not(.preview)");
+  body.style.height = ""; // pomiar od bazowej wysokości z CSS
+  const baseH = body.offsetHeight;
+  const blocks = [...body.querySelectorAll(".cal-block:not(.preview)")];
+  const pcts = blocks.map((b) => parseFloat(b.style.height));
+  // height:auto → naturalna wysokość treści (szerokość kafelka się nie zmienia);
+  // getBoundingClientRect — pomiar ułamkowy, bez zaokrągleń offsetHeight
+  blocks.forEach((b) => (b.style.height = "auto"));
   let minBodyPx = 0;
-  for (const block of blocks) {
-    const heightPct = parseFloat(block.style.height);
-    if (heightPct > 0) {
-      minBodyPx = Math.max(minBodyPx, block.scrollHeight / (heightPct / 100));
-    }
-  }
-  // clamp(430px, 68vh, 900px) — jak w CSS .cal-body
-  const clampH = Math.max(430, Math.min(900, window.innerHeight * 0.68));
-  body.style.height = Math.ceil(Math.max(clampH, minBodyPx)) + "px";
+  blocks.forEach((b, i) => {
+    if (pcts[i] > 0) minBodyPx = Math.max(minBodyPx, (b.getBoundingClientRect().height * 100) / pcts[i]);
+  });
+  blocks.forEach((b, i) => (b.style.height = pcts[i] + "%"));
+  body.style.height = Math.ceil(Math.max(baseH, minBodyPx)) + "px";
 }
 
 function flashCourse(courseId) {
