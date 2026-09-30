@@ -29,8 +29,14 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from ..core.source import resolve_data_dir
-from .catalog import load_catalog
-from .client import DEFAULT_BASE_URL, EkulClient, LoginError, ScrapingError
+from .catalog import load_catalog, relocate_course, save_catalog
+from .client import (
+    DEFAULT_BASE_URL,
+    EkulClient,
+    LoginError,
+    ScrapingError,
+    WrongStepError,
+)
 from .scraper import scrape_course
 from .state import Limits, ScrapeState
 
@@ -254,6 +260,22 @@ class EkulRefresher:
                 return int(wid)
         raise ScrapingError(f"kid={kid}: brak w catalog.json")
 
+    async def _find_kid_in_ekul(
+        self, client: EkulClient, kid: int
+    ) -> tuple[int, str] | None:
+        """Szuka kierunku w aktualnym spisie wydziałów e-KUL; ``(wid, nazwa)``/``None``."""
+        for wid, name in await client.get_faculties():
+            for ckid, _course_name in await client.get_courses(wid):
+                if ckid == kid:
+                    return wid, name
+        return None
+
+    def _relocate_course(self, kid: int, new_wid: int, faculty_name: str) -> None:
+        """Przenosi wpis kierunku w ``catalog.json`` pod nowy wydział."""
+        catalog = load_catalog(self.data_dir)
+        relocate_course(catalog, kid, new_wid, name=faculty_name)
+        save_catalog(self.data_dir, catalog)
+
     async def _ensure_client(self) -> EkulClient:
         if self._client is None:
             client = EkulClient(
@@ -275,10 +297,19 @@ class EkulRefresher:
                 self._client = None
 
     async def refresh(self, kid: int) -> int:
-        """Odświeża kierunek; zwraca liczbę zużytych żądań (z logowaniem włącznie)."""
+        """Odświeża kierunek; zwraca liczbę zużytych żądań (z logowaniem włącznie).
+
+        Kierunek przeniesiony w e-KUL na inny wydział (pod starym wid
+        formularz cicho się resetuje — ``WrongStepError``) nie ginie:
+        szukamy go w aktualnym spisie wydziałów, przenosimy wpis w
+        ``catalog.json`` pod nowy wid i ponawiamy zbiór. ``course.json``
+        i ``meta.json`` dostają nowy wid z samego ponownego zbioru
+        (``overwrite=True`` przepisuje je z bieżącym wid).
+        """
         wid = self._wid_for_kid(kid)
         total = 0
-        retried = False
+        retried_login = False
+        relocated = False
         while True:
             before = self._client.request_count if self._client else 0
             client = await self._ensure_client()
@@ -286,11 +317,30 @@ class EkulRefresher:
                 await scrape_course(client, wid, kid, self.data_dir, overwrite=True)
             except LoginError:
                 total += client.request_count - before
-                if retried:
+                if retried_login:
                     raise
-                retried = True
+                retried_login = True
                 logger.info("kid=%d: sesja wygasła — powtórne logowanie", kid)
                 await self.close()
+                continue
+            except WrongStepError:
+                total += client.request_count - before
+                if relocated:
+                    raise
+                found = await self._find_kid_in_ekul(client, kid)
+                if found is None or found[0] == wid:
+                    raise  # kierunek nie przeniesiony — zwykły błąd scrapowania
+                new_wid, faculty_name = found
+                relocated = True
+                logger.info(
+                    "kid=%d: przeniesiony na inny wydział (wid=%d -> wid=%d, %s)",
+                    kid,
+                    wid,
+                    new_wid,
+                    faculty_name,
+                )
+                self._relocate_course(kid, new_wid, faculty_name)
+                wid = new_wid
                 continue
             return total + client.request_count - before
 

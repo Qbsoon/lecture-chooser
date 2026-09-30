@@ -12,6 +12,18 @@ import json
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import pytest
+
+from app.scraping.catalog import (
+    course_entry,
+    faculty_entry,
+    load_catalog,
+    save_catalog,
+    set_course_refreshed,
+    upsert_course,
+    upsert_faculty,
+)
+from app.scraping.client import WrongStepError
 from app.scraping.queue import RefreshQueue
 from app.scraping.state import Limits, ScrapeState, state_path
 
@@ -275,3 +287,91 @@ def test_limits_from_settings(tmp_path):
     assert limits == Limits(daily_requests=40, per_course_daily=2, cooldown_minutes=30.0)
     assert Limits.from_settings(None) == Limits()
     assert Limits.from_settings({}) == Limits()
+
+
+# -- EkulRefresher: przenosiny kierunku na inny wydział -----------------------
+
+def _seed_catalog(tmp_path: Path, wid: int, kid: int) -> None:
+    catalog: dict = {}
+    upsert_faculty(catalog, wid, "Stary Wydział")
+    upsert_course(catalog, wid, kid, "Informatyka (stacjonarne II stopnia)")
+    set_course_refreshed(catalog, wid, kid, [1, 3], "ts")
+    save_catalog(tmp_path, catalog)
+
+
+class StubEkulClient:
+    """Klient e-KUL bez sieci: spis wydziałów/kierunków + licznik żądań."""
+
+    def __init__(self, faculties, courses) -> None:
+        self._faculties = faculties
+        self._courses = courses
+        self.request_count = 0
+
+    async def get_faculties(self):
+        return self._faculties
+
+    async def get_courses(self, wid):
+        return self._courses.get(wid, [])
+
+
+def test_ekul_refresher_relocates_moved_course(tmp_path, monkeypatch):
+    """Kierunek przeniesiony w e-KUL: wpis w catalog.json zmienia wid,
+    zbiór jest ponawiany pod nowym wid (scrape widzi oba wywołania)."""
+    import app.scraping.queue as queue_mod
+
+    _seed_catalog(tmp_path, wid=5368, kid=6089)
+    client = StubEkulClient(
+        faculties=[(5368, "Stary Wydział"), (7000, "Nowy Wydział")],
+        courses={5368: [(6082, "Inny kierunek")], 7000: [(6089, "Informatyka II")]},
+    )
+
+    scrape_wids: list[int] = []
+
+    async def fake_scrape(cl, wid, kid, data_dir, *, overwrite=False, **kw):
+        scrape_wids.append(wid)
+        if wid == 5368:
+            raise WrongStepError("qlplan?wid=5368&kid=6089: brak selectów ra/etap (reset?)")
+        return None
+
+    monkeypatch.setattr(queue_mod, "scrape_course", fake_scrape)
+
+    refresher = queue_mod.EkulRefresher("login", "haslo", tmp_path)
+    refresher._client = client  # _ensure_client zwróci stub — bez sieci
+
+    asyncio.run(refresher.refresh(6089))
+
+    # zbiór ponowiony pod nowym wid; catalog.json przeprowadzony za nim
+    assert scrape_wids == [5368, 7000]
+    catalog = load_catalog(tmp_path)
+    assert course_entry(catalog, 5368, 6089) is None
+    entry = course_entry(catalog, 7000, 6089)
+    assert entry is not None
+    assert entry["etaps"] == [1, 3]  # stan (zapisy/etapy) przeniesiony z wpisem
+    assert entry["last_refreshed"] == "ts"
+    assert faculty_entry(catalog, 7000)["name"] == "Nowy Wydział"
+
+
+def test_ekul_refresher_reraises_when_kid_nowhere_else(tmp_path, monkeypatch):
+    """WrongStepError bez przenosiny (kid nie ma nigdzie indziej) — błąd
+    wychodzi normalnie, catalog.json zostaje nietknięty."""
+    import app.scraping.queue as queue_mod
+
+    _seed_catalog(tmp_path, wid=5368, kid=6089)
+    client = StubEkulClient(
+        faculties=[(5368, "Stary Wydział")],
+        courses={5368: [(6082, "Inny kierunek")]},  # 6089 zniknął z e-KUL
+    )
+
+    async def fake_scrape(cl, wid, kid, data_dir, *, overwrite=False, **kw):
+        raise WrongStepError("reset formularza")
+
+    monkeypatch.setattr(queue_mod, "scrape_course", fake_scrape)
+
+    refresher = queue_mod.EkulRefresher("login", "haslo", tmp_path)
+    refresher._client = client
+
+    with pytest.raises(WrongStepError):
+        asyncio.run(refresher.refresh(6089))
+
+    catalog = load_catalog(tmp_path)
+    assert course_entry(catalog, 5368, 6089) is not None  # wpis nietknięty

@@ -78,6 +78,34 @@ def upsert_course(catalog: dict, wid: int, kid: int, name: str) -> dict:
     return course
 
 
+def relocate_course(
+    catalog: dict, kid: int, new_wid: int, *, name: str = ""
+) -> dict:
+    """Przenosi wpis kierunku pod nowy wydział (zachowuje etaps/last_refreshed).
+
+    Kierunek przeniesiony w e-KUL na inny wydział: wpis ``kid`` wypada ze
+    wszystkich innych wydziałów i trafia pod ``new_wid`` — dzięki temu
+    ``_wid_for_kid`` (kolejka odświeżania) i UI widzą go wyłącznie na nowym
+    wydziale. Dane na dysku (``{kid}/{etap}/...``) i wybory użytkowników
+    (ciasteczko kluczowane po ``kid``/zidach) pozostają nietknięte.
+    """
+    entry: dict | None = None
+    for wid, faculty in catalog.items():
+        courses = faculty.get("courses") or {}
+        if str(kid) in courses and int(wid) != int(new_wid):
+            entry = courses.pop(str(kid))
+    faculty = catalog.setdefault(str(new_wid), {"name": "", "courses": {}})
+    if name:
+        faculty["name"] = name
+    courses = faculty.setdefault("courses", {})
+    if entry is None:
+        entry = courses.get(str(kid)) or {}
+    entry.setdefault("etaps", [])
+    entry.setdefault("last_refreshed", None)
+    courses[str(kid)] = entry
+    return entry
+
+
 def set_course_refreshed(
     catalog: dict, wid: int, kid: int, etaps: list[int], timestamp: str
 ) -> dict:

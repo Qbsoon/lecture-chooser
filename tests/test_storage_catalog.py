@@ -16,6 +16,7 @@ from app.scraping.catalog import (
     faculty_entry,
     load_catalog,
     refresh_catalog,
+    relocate_course,
     save_catalog,
     set_course_refreshed,
     upsert_course,
@@ -160,6 +161,39 @@ def test_upsert_preserves_refresh_state():
     # nowy kierunek pod istniejącym wydziałem startuje z pustym stanem
     fresh = upsert_course(catalog, 5368, 6082, "Informatyka I st.")
     assert fresh["etaps"] == [] and fresh["last_refreshed"] is None
+
+
+def test_relocate_course_moves_entry_and_preserves_state():
+    """Przenosina kierunku na inny wydział: wpis zmienia wid, stan zostaje."""
+    catalog: dict = {}
+    upsert_faculty(catalog, 5368, "Stary Wydział")
+    upsert_course(catalog, 5368, 6089, "Informatyka (stacjonarne II stopnia)")
+    set_course_refreshed(catalog, 5368, 6089, [1, 3], "ts")
+
+    entry = relocate_course(catalog, 6089, 7000, name="Nowy Wydział")
+
+    # wpis wypada ze starego wydziału, trafia pod nowy — bez duplikatu
+    assert course_entry(catalog, 5368, 6089) is None
+    assert course_entry(catalog, 7000, 6089) is entry
+    assert faculty_entry(catalog, 7000)["name"] == "Nowy Wydział"
+    # etapy/czas odświeżenia (stan użytkowników) przenoszą się z wpisem
+    assert entry["etaps"] == [1, 3]
+    assert entry["last_refreshed"] == "ts"
+    assert entry["name"] == "Informatyka (stacjonarne II stopnia)"
+
+
+def test_relocate_course_to_same_wid_is_noop():
+    """Przenosina „na ten sam wydział” nie gubi wpisu ani stanu."""
+    catalog: dict = {}
+    upsert_faculty(catalog, 5368, "WNSiT")
+    upsert_course(catalog, 5368, 6089, "Informatyka II st.")
+    set_course_refreshed(catalog, 5368, 6089, [1, 3], "ts")
+
+    entry = relocate_course(catalog, 6089, 5368)
+
+    assert course_entry(catalog, 5368, 6089) is entry
+    assert entry["etaps"] == [1, 3]
+    assert entry["last_refreshed"] == "ts"
 
 
 # -- catalog: refresh (asyncio.run, jak reszta testów w repo) -----------------
