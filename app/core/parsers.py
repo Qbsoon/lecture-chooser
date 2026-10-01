@@ -34,6 +34,7 @@ _PAREN_RE = re.compile(r"\(([^)]*)\)")
 _TIME_RE = re.compile(r"(\d{1,2}):(\d{2})")
 _AMOUNT_RE = re.compile(r"do wyboru\s+(\d+)")
 _NOTE_SERIES_RE = re.compile(r"do wyboru\s+(\d+)\s+specjalnoś", re.IGNORECASE)
+_NOTE_ONE_SPEC_RE = re.compile(r"jednej\s+wybranej\s+specjalności", re.IGNORECASE)
 _NOTE_CONTINUE_RE = re.compile(r"należy\s+kontynuować", re.IGNORECASE)
 _NOTE_COURSES_RE = re.compile(r"należy\s+wybrać\s+(\d+)\s+przedmiot", re.IGNORECASE)
 _NOTE_HOURS_RE = re.compile(r"(\d+)\s+godz", re.IGNORECASE)
@@ -56,6 +57,8 @@ def parse_note(text: str | None) -> NoteSpec | None:
 
     Obsługiwane warianty (w kolejności dopasowania):
       'do wyboru 1 specjalność'                     -> seria: series_amount=1
+      'należy zrealizować wszystkie przedmioty w ramach jednej wybranej specjalności'
+                                                   -> seria: series_amount=1 (nowa treść S4A)
       'należy kontynuować wybrane seminarium'       -> continue_=True (dokładnie 1)
       'należy wybrać 2 przedmioty'                  -> courses=2
       'należy wybrać 120 godz., 12 pkt. ECTS'       -> hours=120, points=12
@@ -67,6 +70,10 @@ def parse_note(text: str | None) -> NoteSpec | None:
     m = _NOTE_SERIES_RE.search(text)
     if m:
         return NoteSpec(series_amount=int(m.group(1)))
+    if _NOTE_ONE_SPEC_RE.search(text):
+        # 'należy zrealizować wszystkie przedmioty w ramach jednej wybranej
+        # specjalności' — wybierz 1 specjalność z serii i zrealizuj ją w całości.
+        return NoteSpec(series_amount=1)
     if _NOTE_CONTINUE_RE.search(text):
         return NoteSpec(continue_=True)
     m = _NOTE_COURSES_RE.search(text)
@@ -109,6 +116,17 @@ def _apply_note(
     elif note.courses is not None:
         current_cat.mode = "exact"
         current_cat.required = note.courses
+
+
+def _is_note_text(text: str) -> bool:
+    """Czy wiersz wygląda na notkę (nie na nazwę sekcji) — heurystycznie.
+
+    Notki S4A zaczynają się od 'należy ...' (ew. w nawiasach); nazwa sekcji
+    nigdy tak się nie zaczyna. Chroni przed tworzeniem kategorii z notki
+    o nierozpoznanej treści (np. po zmianie treści strony).
+    """
+    stripped = _clean(text).strip("()")
+    return stripped.lower().startswith("należy")
 
 
 def _clean(text: str | None) -> str:
@@ -218,6 +236,11 @@ def parse_plan_table(html: str) -> tuple[list[Category], list[Series]]:
             note = parse_note(head)
             if note is not None:
                 _apply_note(note, head, current_cat, current_series)
+                continue
+            if _is_note_text(head):
+                # nierozpoznana notka (np. nowa treść z S4A) — zapamiętujemy
+                # jej treść, ale nie tworzymy z niej kategorii
+                _apply_note(NoteSpec(), head, current_cat, current_series)
                 continue
 
             spec_line = next((ln for ln in lines if ln.startswith("Specjalność:")), None)

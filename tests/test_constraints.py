@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from app.core.dataset import build_dataset
+from app.core.models import entries_meet
 from app.core.source import FileDataLoader
 from app.logic.constraints import evaluate, implicit_zids
 
@@ -102,12 +103,38 @@ def test_two_groups_same_part_is_error():
     assert any("więcej niż jedną grupę" in e for e in status["errors"])
 
 
+def _colliding_pair(dataset):
+    """Para zidów różnych kursów o kolidujących wpisach rozkładu (szukana
+    w danych — odporna na odświeżenie scraped; hardkodowane zidy z rozkładu
+    psuły się po każdej zmianie godzin na S4A).
+    """
+    for zid1, o1 in dataset.offerings.items():
+        for zid2, o2 in dataset.offerings.items():
+            if zid1 >= zid2 or o1.course_id == o2.course_id:
+                continue
+            if any(
+                e1.day == e2.day
+                and e1.start < e2.end
+                and e2.start < e1.end
+                and entries_meet(e1, e2, dataset.semester_start)
+                for e1 in o1.timetable
+                for e2 in o2.timetable
+            ):
+                return {zid1, zid2}
+    return None
+
+
 def test_time_collision_is_warning():
     ds = _dataset()
-    # Teoria lab Grupa 4 (pon 10:00-10:50) vs Bezpieczeństwo seminarium (pon 09:10-10:50)
-    status = evaluate(ds, {765362, 758196})
-    assert status["ok"] is True
+    # np. Aplikacje w środowisku Java lab Grupa 2 (wt 16:40-18:20) vs
+    # Język rosyjski lektorat Grupa 204 (wt 17:30-19:10) — para wyszukiwana
+    # w danych, bo konkretne zidy zmieniają się po odświeżeniu rozkładu
+    pair = _colliding_pair(ds)
+    assert pair, "w danych nie ma pary kolidujących wpisów"
+    status = evaluate(ds, pair)
+    # kolizja godzinowa jest ostrzeżeniem, nie błędem
     assert any("Kolizja" in w for w in status["warnings"])
+    assert not any("Kolizja" in e for e in status["errors"])
 
 
 def test_implicit_zids_cover_obligatory_singles():

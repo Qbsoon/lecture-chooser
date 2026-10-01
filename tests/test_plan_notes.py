@@ -69,6 +69,12 @@ def test_parse_note_variants():
     assert (hours_note.hours, hours_note.points) == (120, 12)
     assert parse_note("(należy kontynuować wybrane seminarium)").continue_ is True
     assert parse_note("do wyboru 1 specjalność").series_amount == 1
+    assert (
+        parse_note(
+            "należy zrealizować wszystkie przedmioty w ramach jednej wybranej specjalności"
+        ).series_amount
+        == 1
+    )
     assert parse_note("do wyboru 1 seminarium wraz z pracownią dyplomową").courses == 1
     assert parse_note("do wyboru 2 przedmioty").courses == 2
     assert parse_note("Przedmioty do wyboru (C)") is None
@@ -202,3 +208,22 @@ def test_informatyka_notes_still_parsed():
     assert by_name["Zajęcia seminaryjne"].required == 1
     assert by_name["Zajęcia monograficzne"].required == 2
     assert series and series[0].required == 1
+
+
+def test_specialization_note_is_not_a_category():
+    """Regresja: notka 'należy zrealizować wszystkie przedmioty w ramach jednej
+    wybranej specjalności' (nowa treść S4A) nie może tworzyć kategorii —
+    przedmioty zostają w kategoriach specjalności, a seria wymaga 1 wyboru.
+    """
+    categories, series = parse_plan_table(PLAN)
+
+    # notka nigdy nie jest nazwą kategorii
+    assert not [c for c in categories if c.name.lower().startswith("należy")]
+
+    spec_cats = [c for c in categories if c.series]
+    assert len(spec_cats) == 2
+    assert all(c.courses for c in spec_cats), "pusta kategoria specjalności"
+
+    spec_series = next(s for s in series if s.required == 1)
+    assert spec_series.note and "specjalności" in spec_series.note
+    assert len(spec_series.category_ids) == 2
