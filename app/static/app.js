@@ -52,6 +52,13 @@ let catColor = new Map();    // category.id -> kolor
 let semesterStart = "2026-10-05"; // poniedziałek 1. tygodnia (daty w linkach Google Calendar)
 let semesterWeeks = 15;           // liczba tygodni semestru
 let flashTimer = null;
+let hideNoTime = true;    // filtr listy: ukryj zajęcia bez terminu w rozkładzie (domyślnie włączony)
+try {
+  // stan z ciasteczka (pierwszeństwo) lub localStorage; bez zapisu — domyślnie on
+  const ck = document.cookie.match(/(?:^|;\s*)hideNoTime=(\d)/);
+  const raw = ck ? ck[1] : localStorage.getItem("hideNoTime");
+  if (raw !== null) hideNoTime = raw === "1";
+} catch (err) {}
 
 const $ = (id) => document.getElementById(id);
 
@@ -412,6 +419,54 @@ function setHoverCourse(course) {
 
 /* ---------- picker ---------- */
 
+// Czy offering ma jakikolwiek termin w rozkładzie (trafia do kalendarza).
+const hasTimetable = (o) => o.timetable.length > 0;
+
+// Grupy widoczne w liście: z włączonym filtrem pomijamy wpisy bez terminu
+// („brak terminu w rozkładzie”) — np. pojedynczą grupę laboratoriów.
+function visibleOfferings(part) {
+  return hideNoTime ? part.offerings.filter(hasTimetable) : part.offerings;
+}
+
+// Kurs widoczny, gdy ma przynajmniej jedną grupę z terminem — inaczej
+// filtr ukrywa cały przedmiot.
+function courseVisible(course) {
+  return !hideNoTime || course.parts.some((p) => p.offerings.some(hasTimetable));
+}
+
+function visibleCourses(cat) {
+  return hideNoTime ? cat.courses.filter(courseVisible) : cat.courses;
+}
+
+let pickerTools = null; // przełącznik filtra — budowany raz, przeżywa re-rendery listy
+
+// Przełącznik on/off nad sekcjami listy: ukrywa zajęcia, które nie
+// występują w tygodniowym planie (wpisy grup albo całe przedmioty).
+function buildPickerTools() {
+  const input = h("input", {
+    type: "checkbox",
+    role: "switch",
+    "aria-label": "Ukryj zajęcia bez terminu w rozkładzie",
+    onchange: (ev) => {
+      hideNoTime = ev.target.checked;
+      try { localStorage.setItem("hideNoTime", hideNoTime ? "1" : "0"); } catch (err) {}
+      // ciasteczko — stan przeżywa też wyczyszczenie localStorage
+      document.cookie = `hideNoTime=${hideNoTime ? "1" : "0"};path=/;max-age=31536000;samesite=lax`;
+      renderPicker();
+    },
+  });
+  input.checked = hideNoTime;
+  return h("div", { class: "picker-tools" },
+    h("label", {
+      class: "switch-row",
+      title: "Ukrywa zajęcia nieobecne w planie tygodniowym („brak terminu w rozkładzie”): pojedyncze grupy bez terminu, a przedmioty, w których żadna grupa nie ma terminu — w całości.",
+    },
+      h("span", { class: "switch" }, input, h("span", { class: "slider" })),
+      h("span", { text: "Ukryj bez terminu" }),
+    ),
+  );
+}
+
 function courseSelectable(cat) {
   return !cat.obligatory && !cat.series && cat.mode !== "all";
 }
@@ -440,6 +495,7 @@ function hoursChip(cat) {
 }
 
 function renderCourse(cat, course) {
+  if (!courseVisible(course)) return null; // cały przedmiot bez terminów — ukryty
   const state = courseState(course);
   const selectable = courseSelectable(cat);
   const color = catColor.get(cat.id);
@@ -475,7 +531,7 @@ function renderCourse(cat, course) {
     // grupowych, a tam implicit nigdy nic nie dodaje (planned == selected)
     const chosen = part.offerings.filter((o) => selected.has(o.zid));
     const needsGroup = onPlan && chosen.length === 0 && part.offerings.length > 1;
-    for (const o of part.offerings) {
+    for (const o of visibleOfferings(part)) {
       const row = h("label", {
         class: "offering" + (planned.has(o.zid) ? " on" : "") + (needsGroup ? " needs-group" : ""),
         "data-zid": o.zid,
@@ -513,6 +569,8 @@ function renderCourse(cat, course) {
 }
 
 function renderCategoryCard(cat) {
+  const courses = visibleCourses(cat);
+  if (!courses.length) return null; // wszystkie przedmioty kategorii ukryte filtrem
   const active = categoryActive(cat);
   const head = h("div", { class: "cat-head" },
     h("span", { class: "dot", style: `background:${catColor.get(cat.id)}` }),
@@ -525,7 +583,7 @@ function renderCategoryCard(cat) {
     }),
   );
   return h("div", { class: "cat-card" }, head,
-    ...cat.courses.map((c) => renderCourse(cat, c)));
+    ...courses.map((c) => renderCourse(cat, c)));
 }
 
 function renderPicker() {
@@ -533,6 +591,10 @@ function renderPicker() {
   picker.textContent = "";
   // kursor opuszcza listę -> czyścimy podgląd w kalendarzu
   picker.onmouseleave = () => setHover(null);
+
+  // przełącznik filtra „bez terminu” nad sekcjami listy
+  if (!pickerTools) pickerTools = buildPickerTools();
+  picker.append(pickerTools);
 
   // Wspólny zwijany box sekcji; stan rozwinięcia zapamiętujemy w openBoxes,
   // żeby przerysowanie listy po wyborze nie zwijało boxa, który użytkownik otworzył.
@@ -550,16 +612,19 @@ function renderPicker() {
 
   const obligatory = dataset.categories.find((c) => c.obligatory);
   if (obligatory) {
-    picker.append(box("obligatory",
-      [
-        h("span", { text: "🔒 Przedmioty obowiązkowe" }),
-        h("span", { class: "count-chip", text: `${obligatory.courses.length}` }),
-      ],
-      [
-        h("p", { class: "p-note", text: "Przedmioty przypisane na stałe — jeśli mają grupy, wybierz jedną." }),
-        ...obligatory.courses.map((c) => renderCourse(obligatory, c)),
-      ],
-    ));
+    const courses = visibleCourses(obligatory);
+    if (courses.length) {
+      picker.append(box("obligatory",
+        [
+          h("span", { text: "🔒 Przedmioty obowiązkowe" }),
+          h("span", { class: "count-chip", text: `${obligatory.courses.length}` }),
+        ],
+        [
+          h("p", { class: "p-note", text: "Przedmioty przypisane na stałe — jeśli mają grupy, wybierz jedną." }),
+          ...courses.map((c) => renderCourse(obligatory, c)),
+        ],
+      ));
+    }
   }
 
   const seriesMap = new Map(); // nazwa serii -> kategorie
@@ -570,7 +635,7 @@ function renderPicker() {
   }
 
   for (const series of dataset.series) {
-    const cats = seriesMap.get(series.name) || [];
+    const cats = (seriesMap.get(series.name) || []).filter((c) => visibleCourses(c).length);
     if (!cats.length) continue;
     const activeN = cats.filter(categoryActive).length;
     picker.append(box(`series:${series.name}`,
@@ -587,6 +652,8 @@ function renderPicker() {
 
   for (const cat of dataset.categories) {
     if (cat.obligatory || cat.series) continue;
+    const courses = visibleCourses(cat);
+    if (!courses.length) continue; // cała kategoria bez terminów — ukryta
     const active = cat.courses.filter((c) => courseState(c).active).length;
     picker.append(box(`cat:${cat.id}`,
       [
@@ -596,7 +663,7 @@ function renderPicker() {
       ],
       [
         cat.note ? h("p", { class: "p-note", text: cat.note }) : null,
-        ...cat.courses.map((c) => renderCourse(cat, c)),
+        ...courses.map((c) => renderCourse(cat, c)),
       ],
     ));
   }
