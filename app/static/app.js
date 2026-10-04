@@ -60,6 +60,19 @@ try {
   if (raw !== null) hideNoTime = raw === "1";
 } catch (err) {}
 
+// Tryb kalendarza (v3, krok 5): "general" = tydzień ogólny (cykle, jak
+// dotychczas), "current" = tydzień obecny (rzeczywiste daty z terminarzy,
+// nawigacja od bieżącego tygodnia do końca danych kierunku).
+let calMode = "general";
+// Wyświetlany tydzień w trybie "obecny": null = bieżący wg dzisiejszej daty
+// (stan ulotny — po przeładowaniu wracamy do bieżącego tygodnia).
+let curWeek = null;
+try {
+  const ck = document.cookie.match(/(?:^|;\s*)calMode=(current|general)/);
+  const raw = ck ? ck[1] : localStorage.getItem("calMode");
+  if (raw === "current" || raw === "general") calMode = raw;
+} catch (err) {}
+
 const $ = (id) => document.getElementById(id);
 
 function h(tag, attrs = {}, ...children) {
@@ -115,6 +128,32 @@ function weekOfDate(iso) {
   base.setDate(base.getDate() - ((base.getDay() + 6) % 7));
   const w = Math.round((day - base) / 86400000 / 7) + 1;
   return w >= 1 ? w : null;
+}
+
+// Tryb "obecny" (v3, krok 5): tydzień wyliczany z dzisiejszej daty.
+// weekMonday(w) — data poniedziałku tygodnia w (lustro semester_monday).
+function weekMonday(w) {
+  const base = new Date(`${semesterStart}T12:00:00`);
+  base.setDate(base.getDate() - ((base.getDay() + 6) % 7)); // poniedziałek 1. tyg.
+  base.setDate(base.getDate() + (w - 1) * 7);
+  return base;
+}
+
+const fmtDayMonth = (d) =>
+  `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}`;
+
+// Bieżący tydzień semestru wg dzisiejszej daty (zafixowany w [1, semesterWeeks]).
+function currentWeek() {
+  const t = new Date();
+  const iso = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
+  const w = weekOfDate(iso);
+  if (w === null) return 1; // przed początkiem semestru → 1. tydzień
+  return Math.max(1, Math.min(w, semesterWeeks));
+}
+
+// Wyświetlany tydzień w trybie "obecny": curWeek (wybrany nawigacją) albo bieżący.
+function displayedWeek() {
+  return curWeek ?? currentWeek();
 }
 
 // Czy dwa wpisy mogą się spotkać w tym samym tygodniu — lustro
@@ -671,7 +710,7 @@ function renderPicker() {
 
 /* ---------- kalendarz ---------- */
 
-// Czy wpis o danym cyklu pasuje do aktualnego widoku.
+// Czy wpis o danym cyklu pasuje do aktualnego widoku (tryb "ogólny").
 // "A"/"B" to widoki parzystości: pokazują zajęcia odbywające się w którymkolwiek
 // tygodniu nieparzystym (1, 3) / parzystym (2, 4) semestru.
 function viewMatches(cycle) {
@@ -683,7 +722,7 @@ function viewMatches(cycle) {
   }
 }
 
-// Czy wpis (cykliczny LUB datowany) pasuje do aktualnego widoku.
+// Czy wpis (cykliczny LUB datowany) pasuje do aktualnego widoku (tryb "ogólny").
 // Wpis datowany występuje dokładnie raz — w tygodniu wynikającym z daty.
 function entryInView(e) {
   if (!e.date) return viewMatches(e.cycle);
@@ -697,13 +736,58 @@ function entryInView(e) {
   }
 }
 
+// Czy wpis pasuje do konkretnego tygodnia semestru (tryb "obecny").
+function entryInViewWeek(e, w) {
+  if (e.date) return weekOfDate(e.date) === w;
+  return cycleMatches(e.cycle, w);
+}
+
+// Pseudo-wpis kalendarza z konkretnego spotkania terminarza (Meeting →
+// TimetableEntry) — tryb "obecny": kafelki z rzeczywistych dat, gdy
+// offering ma terminarz (sales/{zid}.html).
+function meetingToEntry(m, offering) {
+  const d = new Date(`${m.date}T12:00:00`);
+  const day = (d.getDay() + 6) % 7; // JS 0=Nd..6=So → 0=Pn..6=Nd
+  return {
+    day, start: m.start, end: m.end,
+    cycle: "T", room: m.room,
+    online: false, hybrid: false,
+    teacher: (offering.teachers || []).join(", "),
+    date: m.date,
+  };
+}
+
+// Wpisy do wyświetlenia dla danego offeringu — zależnie od trybu kalendarza.
+// Tryb "obecny": spotkania z terminarza (meetings) filtrowane po tygodniu,
+// fallback na wpisy cykliczne (timetable), gdy terminarza brak.
+function offeringEntries(offering) {
+  const out = [];
+  if (calMode === "current") {
+    const w = displayedWeek();
+    if (offering.meetings && offering.meetings.length) {
+      for (const m of offering.meetings) {
+        if (weekOfDate(m.date) === w) out.push(meetingToEntry(m, offering));
+      }
+    } else {
+      for (const e of offering.timetable) {
+        if (entryInViewWeek(e, w)) out.push(e);
+      }
+    }
+  } else {
+    for (const e of offering.timetable) {
+      if (entryInView(e)) out.push(e);
+    }
+  }
+  return out;
+}
+
 function displayedEntries() {
   const out = [];
   for (const zid of plannedZids()) {
     const info = courseIndex.get(zid);
     if (!info) continue;
-    for (const e of info.offering.timetable) {
-      if (entryInView(e)) out.push({ e, ...info });
+    for (const e of offeringEntries(info.offering)) {
+      out.push({ e, ...info });
     }
   }
   return out;
@@ -745,8 +829,8 @@ function renderCalendar() {
     if (planned.has(zid)) continue;
     const info = courseIndex.get(zid);
     if (!info) continue;
-    for (const e of info.offering.timetable) {
-      if (entryInView(e)) entries.push({ e, ...info, preview: true });
+    for (const e of offeringEntries(info.offering)) {
+      entries.push({ e, ...info, preview: true });
     }
   }
 
@@ -766,7 +850,17 @@ function renderCalendar() {
   body.style.setProperty("--hours", hours);
 
   head.append(h("div", { class: "cal-corner" }));
-  for (const d of days) head.append(h("div", { class: "cal-day-name", text: DAY_NAMES[d] }));
+  // W trybie "obecny" do nazwy dnia doklejamy konkretną datę (dd.MM).
+  const monday = calMode === "current" ? weekMonday(displayedWeek()) : null;
+  for (const d of days) {
+    let label = DAY_NAMES[d];
+    if (monday) {
+      const dt = new Date(monday);
+      dt.setDate(dt.getDate() + d);
+      label += " " + fmtDayMonth(dt);
+    }
+    head.append(h("div", { class: "cal-day-name", text: label }));
+  }
 
   body.append(h("div", { class: "cal-hours" }));
   for (let m = minH; m <= maxH; m += 60) {
@@ -873,11 +967,71 @@ function flashCourse(courseId) {
   flashTimer = setTimeout(() => el.classList.remove("flash"), 1300);
 }
 
-/* ---------- status / panel / toast ---------- */
+/* ---------- przełącznik trybu kalendarza (v3, krok 5) ---------- */
+
+// Zapis trybu kalendarza (cookie + localStorage, jak hideNoTime).
+function saveCalMode() {
+  try {
+    document.cookie = `calMode=${calMode};path=/;max-age=31536000;samesite=lax`;
+    localStorage.setItem("calMode", calMode);
+  } catch (err) {}
+}
+
+function renderModeSwitch() {
+  const box = $("modeSwitch");
+  box.textContent = "";
+  const btn = (id, label, title) => box.append(h("button", {
+    type: "button",
+    "aria-pressed": String(calMode === id),
+    title,
+    onclick: () => {
+      if (calMode === id) return;
+      calMode = id;
+      curWeek = null; // powrót do bieżącego tygodnia
+      saveCalMode();
+      renderCalendar();
+      renderWeekSwitch();
+      renderModeSwitch();
+    },
+  }, h("span", { text: label })));
+  btn("general", "Ogólny", "Tydzień ogólny — widok cykli (sumarycznie / A / B / 1–4)");
+  btn("current", "Obecny", "Tydzień obecny — rzeczywiste daty z terminarzy, od bieżącego tygodnia");
+}
+
+/* ---------- przełącznik widoków / nawigacja tygodni ---------- */
 
 function renderWeekSwitch() {
   const box = $("weekSwitch");
   box.textContent = "";
+
+  if (calMode === "current") {
+    // Nawigacja: bieżący tydzień ← → koniec danych kierunku (bez przewijania
+    // poza dane; wstecz tylko do bieżącego tygodnia). Stan ulotny — po
+    // przeładowaniu wracamy do bieżącego tygodnia (curWeek nie jest zapisywany).
+    const cw = currentWeek();
+    const w = displayedWeek();
+    const minW = cw;
+    const maxW = Math.max(1, semesterWeeks);
+    const monday = weekMonday(w);
+    const sunday = new Date(monday);
+    sunday.setDate(sunday.getDate() + 6);
+    box.append(h("button", {
+      type: "button",
+      title: "Poprzedni tydzień",
+      disabled: w <= minW,
+      onclick: () => { curWeek = Math.max(minW, w - 1); renderCalendar(); renderWeekSwitch(); },
+    }, h("span", { text: "◀" })));
+    box.append(h("span", { class: "week-label", text: `Tydzień ${w} (${fmtDayMonth(monday)}–${fmtDayMonth(sunday)})` }));
+    box.append(h("button", {
+      type: "button",
+      title: "Następny tydzień",
+      disabled: w >= maxW,
+      onclick: () => { curWeek = Math.min(maxW, w + 1); renderCalendar(); renderWeekSwitch(); },
+    }, h("span", { text: "▶" })));
+    return;
+  }
+
+  // Tryb "ogólny": sumarycznie / A / B / tygodnie 1–4 (jak dotychczas).
   const btn = (id, label, small, title, onclick) => box.append(h("button", {
     type: "button",
     "aria-pressed": String(view === id),
@@ -1039,6 +1193,7 @@ async function switchCourse(kid, etap) {
     await loadSelection();
     openBoxes = new Set(); // rozwinięte sekcje listy dotyczyły poprzedniego kierunku
     view = "sum";
+    curWeek = null;
     picked = { ...course };
     render();
     renderCourseBar();
@@ -1902,6 +2057,7 @@ function closeCalendary() {
 
 function render() {
   renderPicker();
+  renderModeSwitch();
   renderCalendar();
   renderWeekSwitch();
   renderStatus(localStatus());

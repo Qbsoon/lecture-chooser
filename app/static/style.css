@@ -245,6 +245,10 @@ html, body {
 
 .week-switch button[aria-pressed="true"] { background: var(--accent); color: #fff; }
 
+.week-switch .week-label { padding: 5px 10px; font-size: 0.85rem; color: var(--text); white-space: nowrap; align-self: center; }
+
+.week-switch button:disabled { opacity: 0.4; cursor: default; }
+
 .btn {
   border: 1px solid var(--border);
   background: var(--bg);
