@@ -142,6 +142,9 @@ function weekMonday(w) {
 const fmtDayMonth = (d) =>
   `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}`;
 
+const isoDate = (d) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
 // Bieżący tydzień semestru wg dzisiejszej daty (zafixowany w [1, semesterWeeks]).
 function currentWeek() {
   const t = new Date();
@@ -380,12 +383,13 @@ function localStatus() {
     });
   }
 
-  // kolizje godzinowe (we wszystkich tygodniach — jak na serwerze)
+  // kolizje godzinowe (na konkretnych datach z terminarza, gdy dostępne —
+  // inaczej cykle z timetable; spójnie z renderem i eksportami, krok 8)
   const placed = [];
   for (const zid of planned) {
     const info = courseIndex.get(zid);
     if (!info) continue;
-    for (const e of info.offering.timetable) placed.push({ e, name: info.course.name });
+    for (const e of allEntries(info.offering)) placed.push({ e, name: info.course.name });
   }
   placed.sort((a, b) => a.e.day - b.e.day || a.e.start - b.e.start);
   outer:
@@ -798,7 +802,7 @@ function collidingZids() {
   for (const zid of plannedZids()) {
     const info = courseIndex.get(zid);
     if (!info) continue;
-    for (const e of info.offering.timetable) placed.push({ e, zid });
+    for (const e of allEntries(info.offering)) placed.push({ e, zid });
   }
   placed.sort((a, b) => a.e.day - b.e.day || a.e.start - b.e.start);
   const bad = new Set();
@@ -892,6 +896,20 @@ function renderCalendar() {
 
   for (const d of days) {
     const dayEl = h("div", { class: "cal-day" });
+    // Nakładka dni wolnych/uroczystości (tylko tryb "obecny", v3 krok 6).
+    if (calMode === "current" && monday && calDayMap) {
+      const dt = new Date(monday);
+      dt.setDate(dt.getDate() + d);
+      const evs = calDayMap[isoDate(dt)];
+      if (evs) {
+        const hasFree = evs.some((e) => e.free);
+        dayEl.classList.add(hasFree ? "cal-day-free" : "cal-day-notice");
+        dayEl.append(h("div", {
+          class: "cal-day-badge " + (hasFree ? "free" : "notice"),
+          title: evs.map((e) => `${e.heading} — ${e.label}`).join("\n"),
+        }, h("span", { text: evs.map((e) => e.label).join(", ") })));
+      }
+    }
     for (const { x, lane } of columns.get(d)) {
       const { e, course, offering, category } = x;
       const color = catColor.get(category.id);
@@ -1355,12 +1373,21 @@ function downloadFile(name, data, mime) {
 
 // wszystkie terminy zajęć na planie (wybór jawny + części wliczone
 // automatycznie; bez filtra widoku kalendarza)
+// Wszystkie wpisy dla offeringu — meetings (konkretne daty), gdy dostępne,
+// inaczej timetable (cykle). Używane przez eksporty CSV/JSON (v3, krok 7).
+function allEntries(offering) {
+  if (offering.meetings && offering.meetings.length) {
+    return offering.meetings.map((m) => meetingToEntry(m, offering));
+  }
+  return offering.timetable;
+}
+
 function selectedEntries() {
   const out = [];
   for (const zid of plannedZids()) {
     const info = courseIndex.get(zid);
     if (!info) continue;
-    out.push({ ...info, entries: info.offering.timetable });
+    out.push({ ...info, entries: allEntries(info.offering) });
   }
   return out;
 }
@@ -1402,104 +1429,6 @@ function exportJSON() {
     exported_at: new Date().toISOString(),
     plan,
   }, null, 2), "application/json");
-}
-
-/* ---------- Google Calendar: dodanie zajęć jako wydarzeń ---------- */
-
-function gcalLinks() {
-  // Po jednym linku „dodaj wydarzenie” na każdy termin wybranych zajęć.
-  // Link otwiera formularz nowego wydarzenia wypełniony danymi zajęć —
-  // wydarzenie trafia do WŁASNEGO kalendarza użytkownika. Nic nie synchronizujemy:
-  // wybór żyje tylko w ciasteczku, więc żadnej subskrypcji kalendarza nie ma.
-  const links = [];
-  const base = new Date(`${semesterStart}T00:00:00`);
-  const p2 = (n) => String(n).padStart(2, "0");
-  for (const { offering: o, course, category, entries } of selectedEntries()) {
-    for (const e of entries) {
-      const stamp = (day, m) =>
-        `${day.getFullYear()}${p2(day.getMonth() + 1)}${p2(day.getDate())}` +
-        `T${p2(Math.floor(m / 60))}${p2(m % 60)}00`;
-
-      // wpis datowany: jedno wydarzenie w konkretnym dniu (cykl nieregularny)
-      if (e.date) {
-        const day = new Date(`${e.date}T00:00:00`);
-        if (isNaN(day)) continue;
-        const params = new URLSearchParams({
-          action: "TEMPLATE",
-          text: `${course.name} (${o.group || o.kind})`,
-          dates: `${stamp(day, e.start)}/${stamp(day, e.end)}`,
-          location: [e.online ? "ONLINE" : e.room, e.hybrid ? "hybrydowe" : null].filter(Boolean).join(" ") || "—",
-          details: [
-            `${o.kind} · ${category.name}`,
-            e.teacher || o.teachers.join(", "),
-            `termin jednorazowy: ${e.date} (zajęcia w cyklu nieregularnym)`,
-          ].filter(Boolean).join("\n"),
-          ctz: "Europe/Warsaw",
-        });
-        links.push({
-          label: `${e.date} ${fmtTime(e.start)}–${fmtTime(e.end)} · ${course.name}${o.group ? ` (${o.group})` : ""}`,
-          href: `https://calendar.google.com/calendar/render?${params}`,
-        });
-        continue;
-      }
-
-      // tygodnie semestru, w których odbywają się te zajęcia (wg cyklu)
-      const weeks = [];
-      for (let w = 1; w <= semesterWeeks; w++) if (cycleMatches(e.cycle, w)) weeks.push(w);
-      if (!weeks.length) continue;
-      const day = new Date(base);
-      day.setDate(day.getDate() + (weeks[0] - 1) * 7 + e.day);
-
-      // Powtarzanie: gdy tygodnie tworzą prostą progresję co 1/2/4 tyg.,
-      // dokładamy RRULE (Google nie dokumentuje parametru recur — best effort;
-      // szczegóły cyklu są też w opisie wydarzenia).
-      let recur = "";
-      for (const step of [1, 2, 4]) {
-        const expected = [];
-        for (let w = weeks[0]; w <= semesterWeeks; w += step) expected.push(w);
-        if (expected.length === weeks.length && expected.every((w, i) => w === weeks[i])) {
-          recur = step === 1
-            ? `FREQ=WEEKLY;COUNT=${weeks.length}`
-            : `FREQ=WEEKLY;INTERVAL=${step};COUNT=${weeks.length}`;
-          break;
-        }
-      }
-
-      const params = new URLSearchParams({
-        action: "TEMPLATE",
-        text: `${course.name} (${o.group || o.kind})`,
-        dates: `${stamp(day, e.start)}/${stamp(day, e.end)}`,
-        location: [e.online ? "ONLINE" : e.room, e.hybrid ? "hybrydowe" : null].filter(Boolean).join(" ") || "—",
-        details: [
-          `${o.kind} · ${category.name}`,
-          e.teacher || o.teachers.join(", "),
-          `cykl: ${CYCLE_LABELS[e.cycle] || e.cycle} — zajęcia powtarzają się wg tego cyklu do końca semestru`,
-        ].filter(Boolean).join("\n"),
-        ctz: "Europe/Warsaw",
-      });
-      if (recur) params.set("recur", `RRULE:${recur}`);
-      links.push({
-        label: `${DAY_SHORT[e.day]} ${fmtTime(e.start)}–${fmtTime(e.end)} · ${course.name}${o.group ? ` (${o.group})` : ""}`,
-        href: `https://calendar.google.com/calendar/render?${params}`,
-      });
-    }
-  }
-  return links;
-}
-
-function renderGcalList() {
-  const list = $("gcalList");
-  if (!list) return;
-  list.textContent = "";
-  const links = gcalLinks();
-  if (!links.length) {
-    list.append(h("div", { class: "gcal-empty", text: plannedZids().size ? "Zajęcia na planie nie mają terminów w rozkładzie." : "Najpierw wybierz zajęcia." }));
-    return;
-  }
-  list.append(h("div", { class: "gcal-note", text: "Każdy link otwiera formularz nowego wydarzenia w Twoim kalendarzu Google:" }));
-  for (const { label, href } of links) {
-    list.append(h("a", { href, target: "_blank", rel: "noopener", text: label }));
-  }
 }
 
 function hexToRgba(hex, alpha) {
@@ -1982,51 +1911,62 @@ function initDownloadMenu() {
     png: exportPNG,
   };
   menu.addEventListener("click", (ev) => {
-    // „Google Calendar” rozwija podmenu z linkami „dodaj wydarzenie”
-    const gcalToggle = ev.target.closest(".gcal-toggle");
-    if (gcalToggle) {
-      const sub = gcalToggle.closest(".dropdown-sub");
-      const wasOpen = sub.classList.contains("open");
-      sub.classList.toggle("open");
-      if (!wasOpen) renderGcalList(); // świeży stan wyboru przy każdym rozwinięciu
-      return;
-    }
     const btn = ev.target.closest("[data-export]");
     if (!btn) return;
     menu.removeAttribute("open");
     const fn = actions[btn.dataset.export];
     if (fn) fn();
   });
-  // klik poza menu zamyka listę (i podmenu Google)
+  // klik poza menu zamyka listę
   document.addEventListener("click", (ev) => {
     if (!menu.contains(ev.target)) {
       menu.removeAttribute("open");
-      const sub = menu.querySelector(".dropdown-sub");
-      if (sub) sub.classList.remove("open");
     }
   });
 }
 
 /* ---------- pop-up kalendarium ---------- */
 
-let calendaryLoaded = false;
+let calEvents = null; // wydarzenia z /api/calendary (cache)
+let calDayMap = null; // ISO date → [{label, free, heading}, ...]
+
+// Pobiera kalendarium raz i buduje mapę dni → wydarzenia (v3, krok 6).
+// Wykorzystywane przez nakładkę w kalendarzu (tryb "obecny") oraz pop-up.
+async function ensureCalendary() {
+  if (calEvents) return;
+  try {
+    const res = await fetch("/api/calendary");
+    if (!res.ok) return;
+    const data = await res.json();
+    calEvents = data.events || [];
+    calDayMap = {};
+    for (const ev of calEvents) {
+      let dt = new Date(ev.from + "T12:00:00");
+      const end = new Date(ev.to + "T12:00:00");
+      while (dt <= end) {
+        const iso = isoDate(dt);
+        (calDayMap[iso] ||= []).push({ label: ev.label, free: ev.free, heading: ev.heading });
+        const next = new Date(dt);
+        next.setDate(next.getDate() + 1);
+        dt = next;
+      }
+    }
+  } catch (err) {}
+}
 
 async function openCalendary() {
   const modal = $("calendaryModal");
   const body = $("calendaryBody");
   modal.hidden = false;
   document.body.style.overflow = "hidden";
-  if (!calendaryLoaded) {
+  if (!calEvents) {
     body.textContent = "Ładowanie kalendarium…";
-    try {
-      const res = await fetch("/api/calendary");
-      if (!res.ok) throw new Error(String(res.status));
-      const data = await res.json();
-      body.replaceChildren(...renderCalendary(data.events || []));
-      calendaryLoaded = true;
-    } catch (err) {
-      body.textContent = "Nie udało się pobrać kalendarium.";
-    }
+    await ensureCalendary();
+  }
+  if (calEvents) {
+    body.replaceChildren(...renderCalendary(calEvents));
+  } else {
+    body.textContent = "Nie udało się pobrać kalendarium.";
   }
 }
 
@@ -2122,6 +2062,9 @@ async function init() {
   }
   if (dataset.semester_start) semesterStart = dataset.semester_start;
   if (dataset.semester_weeks) semesterWeeks = dataset.semester_weeks;
+  ensureCalendary().then(() => {
+    if (calMode === "current") renderCalendar();
+  });
   indexData();
   // ?z=1,5,9 — wybór przekazany linkiem (m.in. dla serwerowego renderu PDF
   // i udostępniania planu); ?view=sum|A|B|w1..w4 — widok do wyrenderowania.

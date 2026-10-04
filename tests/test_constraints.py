@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from app.core.dataset import build_dataset
-from app.core.models import entries_meet
+from app.core.models import entries_meet, offering_entries
 from app.core.source import FileDataLoader
 from app.logic.constraints import evaluate, implicit_zids
 
@@ -117,8 +117,8 @@ def _colliding_pair(dataset):
                 and e1.start < e2.end
                 and e2.start < e1.end
                 and entries_meet(e1, e2, dataset.semester_start)
-                for e1 in o1.timetable
-                for e2 in o2.timetable
+                for e1 in offering_entries(o1)
+                for e2 in offering_entries(o2)
             ):
                 return {zid1, zid2}
     return None

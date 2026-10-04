@@ -82,6 +82,32 @@ def week_of_date(day: str | date | None, semester_start: str | None) -> int | No
     return week if week >= 1 else None
 
 
+def offering_entries(offering: "Offering") -> list["TimetableEntry"]:
+    """Wpisy do wykrywania kolizji — meetings (konkretne daty) gdy dostępne,
+    fallback na timetable (cykle). v3, krok 8.
+
+    Spotkania z terminarza mają konkretne daty (święta już pominięte),
+    więc kolizja liczona po dniach jest dokładniejsza niż rozwijanie cykli.
+    """
+    if offering.meetings:
+        out: list[TimetableEntry] = []
+        for m in offering.meetings:
+            try:
+                d = date.fromisoformat(m.date)
+            except ValueError:
+                continue
+            out.append(TimetableEntry(
+                zid=offering.zid, day=d.weekday(),
+                start=m.start, end=m.end, cycle="T",
+                room=m.room, online=False, hybrid=False,
+                subject="", kind=offering.kind, group=offering.group,
+                teacher="", date=m.date,
+            ))
+        if out:
+            return out
+    return offering.timetable
+
+
 def entries_meet(
     e1: "TimetableEntry", e2: "TimetableEntry", semester_start: str | None
 ) -> bool:

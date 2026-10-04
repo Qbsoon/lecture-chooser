@@ -1,7 +1,15 @@
 """Testy generatora iCalendar (eksport .ics)."""
 from __future__ import annotations
 
-from app.core.models import Category, Course, Dataset, Offering, Part, TimetableEntry
+from app.core.models import (
+    Category,
+    Course,
+    Dataset,
+    Meeting,
+    Offering,
+    Part,
+    TimetableEntry,
+)
 from app.logic.ics import build_ics
 
 
@@ -68,3 +76,72 @@ def test_ics_start_normalized_to_monday():
     # piątek 2026-10-09 -> wracamy do poniedziałku tego tygodnia (2026-10-05)
     ics = build_ics(_dataset(semester_start="2026-10-09"), {100})
     assert "DTSTART:20261005T091500" in ics
+
+
+# ── v3 krok 7: ICS z terminarza (meetings) ──────────────────────────
+
+def _dataset_meetings(semester_start: str | None = "2026-10-05", weeks: int = 15) -> Dataset:
+    """Dataset z offeringiem, który ma terminarz (meetings) — 3 spotkania
+    w konkretnych datach (z pominięciem dni wolnych)."""
+    entry = TimetableEntry(
+        zid=200, day=0, start=9 * 60 + 15, end=11 * 60 + 15, cycle="T",
+        room="Sala 221", online=False, hybrid=False, subject="Bazy danych",
+        kind="laboratorium", group="Grupa 1", teacher="dr Anna Nowak",
+    )
+    meetings = [
+        Meeting(date="2026-10-05", room="Sala 221", start=9 * 60 + 15, end=11 * 60 + 15),
+        Meeting(date="2026-10-12", room="Sala 221", start=9 * 60 + 15, end=11 * 60 + 15),
+        Meeting(date="2026-10-19", room="Sala 222", start=9 * 60 + 15, end=11 * 60 + 15),
+    ]
+    offering = Offering(
+        zid=200, kind="laboratorium", group="Grupa 1",
+        points="Z/3", hours=30, teachers=["dr Anna Nowak"],
+        timetable=[entry], meetings=meetings,
+    )
+    part = Part(kind="laboratorium", offerings=[offering])
+    course = Course(id="c2", name="Bazy danych", parts=[part])
+    category = Category(id="cat2", name="Kategoria", courses=[course])
+    return Dataset(
+        categories=[category], series=[], offerings={200: offering},
+        semester_start=semester_start, semester_weeks=weeks,
+    )
+
+
+def test_ics_meetings_one_event_per_meeting():
+    """Gdy offering ma meetings, ICS generuje jedno wydarzenie na spotkanie
+    — nie rozwija cykli z timetable."""
+    ics = build_ics(_dataset_meetings(), {200})
+    # 3 spotkania = 3 wydarzenia (nie 15 jak przy cyklu T)
+    assert ics.count("BEGIN:VEVENT") == 3
+
+
+def test_ics_meetings_uses_concrete_dates():
+    """Wydarzenia z meetings mają konkretne daty z terminarza."""
+    ics = build_ics(_dataset_meetings(), {200})
+    lines = ics.split("\r\n")
+    dates = [l for l in lines if l.startswith("DTSTART:")]
+    assert "DTSTART:20261005T091500" in dates
+    assert "DTSTART:20261012T091500" in dates
+    assert "DTSTART:20261019T091500" in dates
+
+
+def test_ics_meetings_uses_room_from_meeting():
+    """Lokalizacja w wydarzeniu pochodzi z meeting.room, nie z timetable."""
+    ics = build_ics(_dataset_meetings(), {200})
+    assert "Sala 222" in ics  # 3. spotkanie ma inną salę
+
+
+def test_ics_meetings_uid_format():
+    """UID dla meetings: {zid}-{date}-{start}@lecture-chooser."""
+    ics = build_ics(_dataset_meetings(), {200})
+    assert "UID:200-2026-10-05-555@lecture-chooser" in ics
+    assert "UID:200-2026-10-19-555@lecture-chooser" in ics
+
+
+def test_ics_meetings_fallback_to_timetable_when_no_meetings():
+    """Gdy offering nie ma meetings, ICS rozwija cykle z timetable (jak dotychczas)."""
+    ds = _dataset_meetings()
+    ds.offerings[200].meetings = []  # pusty terminarz
+    ics = build_ics(ds, {200})
+    # fallback na cykl T z timetable = 15 wydarzeń
+    assert ics.count("BEGIN:VEVENT") == 15

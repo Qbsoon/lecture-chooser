@@ -1,7 +1,7 @@
 """Walidacja wyboru przedmiotów względem ograniczeń z planu studiów (notki tabel)."""
 from __future__ import annotations
 
-from ..core.models import Category, Course, Dataset, entries_meet
+from ..core.models import Category, Course, Dataset, entries_meet, offering_entries
 
 
 def _course_state(course: Course, selected: set[int]) -> tuple[bool, list[tuple[object, list]]]:
@@ -76,7 +76,7 @@ def _check_collisions(dataset: Dataset, selected: set[int]) -> list[str]:
         offering = dataset.offerings.get(zid)
         if offering is None:
             continue
-        for entry in offering.timetable:
+        for entry in offering_entries(offering):
             placed.append((entry, offering))
     placed.sort(key=lambda pair: (pair[0].day, pair[0].start))
 

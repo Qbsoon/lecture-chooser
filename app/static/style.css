@@ -165,32 +165,28 @@ html, body {
 
 .cal-scroll,
 .picker,
-.modal-body,
-.dropdown-sub.open .gcal-list {
+.modal-body {
   scrollbar-width: thin;
   scrollbar-color: var(--muted) transparent;
 }
 
 .cal-scroll::-webkit-scrollbar,
 .picker::-webkit-scrollbar,
-.modal-body::-webkit-scrollbar,
-.dropdown-sub.open .gcal-list::-webkit-scrollbar {
+.modal-body::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
 .cal-scroll::-webkit-scrollbar-track,
 .picker::-webkit-scrollbar-track,
-.modal-body::-webkit-scrollbar-track,
-.dropdown-sub.open .gcal-list::-webkit-scrollbar-track {
+.modal-body::-webkit-scrollbar-track {
   background: transparent;
   border-radius: 999px;
 }
 
 .cal-scroll::-webkit-scrollbar-thumb,
 .picker::-webkit-scrollbar-thumb,
-.modal-body::-webkit-scrollbar-thumb,
-.dropdown-sub.open .gcal-list::-webkit-scrollbar-thumb {
+.modal-body::-webkit-scrollbar-thumb {
   background: var(--muted);
   border-radius: 999px;
   border: 2px solid transparent;
@@ -199,8 +195,7 @@ html, body {
 
 .cal-scroll::-webkit-scrollbar-thumb:hover,
 .picker::-webkit-scrollbar-thumb:hover,
-.modal-body::-webkit-scrollbar-thumb:hover,
-.dropdown-sub.open .gcal-list::-webkit-scrollbar-thumb:hover {
+.modal-body::-webkit-scrollbar-thumb:hover {
   background: var(--accent);
   background-clip: padding-box;
 }
@@ -616,6 +611,62 @@ html, body {
   box-shadow: 0 0 0 2px currentColor inset;
 }
 
+/* Nakładka dni wolnych/uroczystości w trybie "obecny" (v3, krok 6) */
+.cal-day-free::after,
+.cal-day-notice::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.cal-day-free::after {
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent, transparent 10px,
+    var(--danger) 10px, var(--danger) 20px
+  );
+  opacity: 0.15;
+}
+
+.cal-day-notice::after {
+  background: var(--accent);
+  opacity: 0.08;
+}
+
+.cal-day-badge {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 4;
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 3px 6px;
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
+
+.cal-day-badge.free {
+  background: var(--danger);
+  color: #fff;
+}
+
+.cal-day-badge.notice {
+  background: var(--accent);
+  color: #fff;
+  opacity: 0.75;
+}
+
+.cal-day-badge span {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ---------- picker ---------- */
 
 .picker { max-height: calc(100vh - 96px); overflow-y: auto; position: sticky; top: 76px; }
@@ -891,30 +942,6 @@ details.dropdown[open] > summary { border-color: var(--accent); background: var(
 }
 
 .dropdown-menu button:hover { background: var(--bg); }
-
-.dropdown-sep { height: 1px; background: var(--border); margin: 5px 8px; }
-
-/* podmenu „Google Calendar” — linki „dodaj wydarzenie” dla kolejnych terminów */
-
-.dropdown-sub > .gcal-toggle::after { content: " ▸"; color: var(--muted); }
-.dropdown-sub.open > .gcal-toggle::after { content: " ▾"; }
-
-.gcal-list { display: none; margin: 2px 0 4px; padding-left: 8px; border-left: 2px solid var(--border); }
-.dropdown-sub.open .gcal-list { display: grid; gap: 1px; max-height: 300px; overflow: auto; }
-
-.gcal-list a {
-  display: block;
-  padding: 5px 8px;
-  border-radius: 6px;
-  font-size: 0.8rem;
-  color: var(--text);
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.gcal-list a:hover { background: var(--bg); }
-
-.gcal-note, .gcal-empty { font-size: 0.72rem; color: var(--muted); padding: 2px 8px 6px; }
 
 /* ---------- druk / PDF ---------- */
 

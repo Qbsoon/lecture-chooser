@@ -77,6 +77,34 @@ def build_ics(dataset: Dataset, zids: set[int]) -> str:
         if not found:
             continue
         offering, course, category = found
+
+        # v3 krok 7: gdy offering ma terminarz (meetings), generujemy
+        # wydarzenia z konkretnych dat — bez rozwijania cykli (święta
+        # i dni wolne są już pominięte w terminarzu). Fallback na cykle
+        # z timetable, gdy terminarza brak.
+        if offering.meetings:
+            teacher = ", ".join(offering.teachers)
+            for m in offering.meetings:
+                try:
+                    day = date.fromisoformat(m.date)
+                except ValueError:
+                    continue
+                location = m.room or ""
+                desc = [offering.kind, category.name]
+                if teacher:
+                    desc.append(teacher)
+                events.append((
+                    (day, m.start),
+                    f"{zid}-{m.date}-{m.start}@lecture-chooser",
+                    f"{course.name} ({offering.group or offering.kind})",
+                    _dt(day, m.start),
+                    _dt(day, m.end),
+                    location,
+                    " · ".join(desc),
+                    category.name,
+                ))
+            continue
+
         for entry in offering.timetable:
             location = (
                 ("ONLINE" + (" — hybrydowe" if entry.hybrid else ""))
