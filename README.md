@@ -3,7 +3,9 @@
 Interaktywny kreator planu zajęć: kalendarz tygodniowy zbudowany z rozkładu zajęć
 połączony z planem studiów, który dostarcza
 podziału na kategorie/serie i ograniczeń wyboru (`settings.json`).
-Dane pochodzą wyłącznie ze scrapingu portalu e-KUL (`scripts/scrape.py`).
+Dane pochodzą wyłącznie ze scrapingu portalu e-KUL (`scripts/scrape.py`):
+plan studiów, rozkład zajęć, terminarze przedmiotów (konkretne daty spotkań)
+oraz kalendarium akademickie (dni wolne, daty semestru).
 
 ## Stack
 
@@ -59,14 +61,21 @@ limity i częstotliwości odświeżania (bez dotykania kodu):
 |---|---|---|
 | `base_url` | `https://e.kul.pl` | bazowy URL portalu e-KUL |
 | `request_delay` | `[2, 6]` | zakres [min, max] sekund pauzy między żądaniami (losowy jitter) |
-| `daily_requests` | `100` | globalny limit żądań e-KUL dziennie (odświeżanie na żądanie) |
-| `per_course_daily` | `5` | limit odświeżeń per kierunek dziennie |
-| `per_course_cooldown_minutes` | `15` | cooldown między odświeżeniami tego samego kierunku |
+| `daily_requests` | `100` | globalny limit odświeżeń kierunków dziennie (ręczne odświeżanie) |
+| `per_course_daily` | `10` | limit odświeżeń per kierunek dziennie |
+| `per_course_cooldown_minutes` | `5` | cooldown między odświeżeniami tego samego kierunku (minuty) |
 | `weekly_refresh` | `{"weekday":"sat","hour":4}` | dzień i godzina cyklu tygodniowego |
 | `login_counts_towards_limit` | `true` | czy logowanie e-KUL liczy się do limitu dobowego |
-| `bootstrap.request_delay` | `[1, 2]` | tempo bootstrapu i cyklu tygodniowego (krótsze pauzy) |
+| `bootstrap.request_delay` | `[0.1, 0.5]` | tempo bootstrapu i cyklu tygodniowego (krótsze pauzy) |
 | `bootstrap.batch_size` | `50` | przerwa co N żądań dla bootstrapu i cyklu tygodniowego |
-| `bootstrap.batch_pause` | `60` | długość przerwy w bootstrapie i cyklu tygodniowym (sekundy) |
+| `bootstrap.batch_pause` | `0` | długość przerwy w bootstrapie i cyklu tygodniowym (sekundy) |
+
+Terminarze przedmiotów (`sales/{zid}.html`) zbierane są w normalnym przepływie
+— po planie i rozkładzie etapu, po jednym żądaniu `fetch_sale` per zid,
+z pominięciem zidów z kompletem na dysku (wznawialność). Nie wymaga osobnego
+przełącznika ani ustawienia; limity ręczne liczą **odświeżenia kierunków**
+(nie żądania HTTP), więc terminarze nie zwiększają zużycia limitu —
+jedno odświeżenie kierunku = 1 do limitu, niezależnie od liczby żądań.
 
 Cykl tygodniowy (scheduler) używa tempa z sekcji `bootstrap` — krótsze pauzy
 i przerwa co 50 żądań, ale **bez** limitów dobowych/per-kierunek/cooldown
@@ -106,11 +115,12 @@ planu studiów rozpoznawane przez `parse_note` (`app/core/parsers.py`):
 - sekcja bez notki — bez ograniczeń liczby („brak limitu”).
 
 `settings.json` przechowuje ustawienia scrapingu (sekcja `scraping`).
-Parametry semestru (`semester_start`, `semester_weeks`) są **wyliczane z danych**
+Zakres semestru (`data_first`/`data_last`) jest **wyliczany z danych**
 (`app/core/dataset.py`): min/max daty spotkań z terminarzy przedmiotów
 (`sales/{zid}.html`), w razie ich braku rozpoczęcie zajęć dydaktycznych
 z kalendarium (`app/data/calendary.html`), ostatecznie stała
-`DEFAULT_SEMESTER_START` w kodzie.
+`DEFAULT_SEMESTER_START` w kodzie. Liczba tygodni wyliczana z `data_last`;
+w ostatecznym fallbacku stała `DEFAULT_SEMESTER_WEEKS` (w `ics.py`).
 
 ## API
 
@@ -124,6 +134,7 @@ z kalendarium (`app/data/calendary.html`), ostatecznie stała
 | GET | `/api/selection` | aktualny wybór z ciasteczka + status walidacji |
 | PUT | `/api/selection` | zapis wyboru `{selected: [zid], week: 1..4, kid?, etap?}` (ustawia ciasteczko); 409 przy wyborze naruszającym limity |
 | DELETE | `/api/selection` | wyczyszczenie wyboru i ciasteczka |
+| GET | `/api/calendary` | kalendarium akademickie: `{events: [...], semester: {...}}` (wydarzenia z `free: bool`, daty rozpoczęcia semestru) |
 | GET | `/api/selection.ics` | kalendarz iCalendar (parametr `z` — wybór z linku, bez cookies) |
 | GET | `/api/selection.pdf` | **wektorowy** PDF planu (`z`, `view=sum\|A\|B\|w1..w4`); 503, gdy serwer nie ma Playwright/Chromium — wtedy strona sama generuje PDF w przeglądarce |
 
@@ -133,6 +144,39 @@ przywraca ostatni stan. Kolizje godzinowe są raportowane jako ostrzeżenia.
 Przycisk **„Udostępnij”** kopiuje link do planu (`/?z=...&view=...`; na telefonie
 otwiera natywne okno udostępniania). Plan otwarty z takiego linku **nie nadpisuje**
 własnego wyboru odbiorcy — ten pozostaje w jego ciasteczku.
+
+## Źródła danych
+
+Dane pochodzą wyłącznie ze scrapingu portalu e-KUL (`scripts/scrape.py`):
+
+- **`plan.html`** — plan studiów (kategorie, serie, ograniczenia wyboru, notki)
+- **`week.html`** — rozkład zajęć (godziny, sale, nauczyciele, cykle T/A/B/C/D)
+- **`sales/{zid}.html`** — terminarze przedmiotów (v3): tabela `datatab` z konkretnymi
+  datami spotkań, salami i godzinami; pominięte są dni wolne/święta już w źródle.
+  Parsowane przez `parse_sale_table` (`app/core/parsers.py`) na listę `Meeting`.
+  Gdy przedmiot nie ma opublikowanego terminarza — fallback na cykle z `week.html`.
+- **`calendary.html`** — kalendarium akademickie (na sztywno w `app/data/`):
+  wydarzenia z datami i flagą dnia wolnego (heurystyka: frazy „dzień wolny”,
+  „dni wolne", „ferie"); daty rozpoczęcia zajęć dydaktycznych semestru.
+  Udostępniane przez `/api/calendary`; wyświetlane w modalu kalendarium.
+
+## Tryby kalendarza
+
+Kalendarz ma dwa tryby (przełącznik obok przełącznika widoków):
+
+- **„Tydzień ogólny"** — widok cykliczny (sum/A/B/w1–w4), bez zmian względem v2.
+  Renderuje wpisy z `week.html` na podstawie cykli (T/A/B/C/D).
+- **„Tydzień obecny"** — widok z konkretnymi datami z terminarzy (`sales/{zid}.html`).
+  Tydzień wyliczany z dzisiejszej daty na podstawie zakresu danych kierunku;
+  nawigacja tydzień w przód **do końca danych** (bez przewijania poza dane),
+  wstecz tylko do bieżącego tygodnia. Wpisy bez terminarza — fallback na cykle.
+
+### Nakładka dni wolnych (tryb „Tydzień obecny")
+
+Dni z `free: true` z kalendarium (`/api/calendary`) dostają w kalendarzu
+przekreślenie kolumny dnia + badge z etykietą (np. „Ferie — Boże Narodzenie");
+tooltip z pełną treścią wpisu. Dni z wydarzeniem bez wolnego (uroczystości) —
+subtelniejszy znacznik informacyjny.
 
 ## Testy
 

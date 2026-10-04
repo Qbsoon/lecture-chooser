@@ -5,7 +5,7 @@ wspólny helper z ``storage.py``)::
 
     {
       "day": "2026-09-04",           # dzień, którego dotyczą liczniki dobowe
-      "requests_today": 12,          # żądania e-KUL tego dnia (limit globalny)
+      "requests_today": 12,          # odświeżenia kierunków tego dnia (limit globalny)
       "courses": {
         "6089": {
           "refreshes_today": 1,      # odświeżenia kierunku tego dnia
@@ -166,7 +166,12 @@ class ScrapeState:
     # -- rejestracja zdarzeń ---------------------------------------------
 
     def record_request(self, count: int, now: datetime) -> None:
-        """Zlicza żądania e-KUL do globalnego licznika dobowego."""
+        """Zlicza odświeżenia kierunków do globalnego licznika dobowego.
+
+        W normalnym przepływie ``count=1`` (jedno odświeżenie = jeden wpis
+        do limitu, niezależnie od liczby żądań HTTP); ``count`` parametr służy
+        też testom do bezpośredniego napełniania licznika.
+        """
         self._roll_day(now)
         if count > 0:
             self.requests_today += count

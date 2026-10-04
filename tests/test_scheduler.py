@@ -243,8 +243,8 @@ def test_scheduled_tasks_bypass_daily_limit(tmp_path):
     _make_catalog(tmp_path, {5368: [1, 2, 3]})
     clock = FakeClock(SAT_4)
     scheduler, queue = _make_scheduler(
-        tmp_path, clock, limits=Limits(daily_requests=6)
-    )  # 3 żądania na zadanie, limit 6 — ale scheduler nie liczy do limitu
+        tmp_path, clock, limits=Limits(daily_requests=2)
+    )  # limit 2 odświeżenia — ale scheduler nie liczy do limitu
 
     scheduler.maybe_schedule()
     assert asyncio.run(queue.run_once()) == "done"
@@ -260,14 +260,14 @@ def test_user_tasks_respect_daily_limit(tmp_path):
     _make_catalog(tmp_path, {5368: [1, 2, 3]})
     clock = FakeClock(SAT_4)
     scheduler, queue = _make_scheduler(
-        tmp_path, clock, limits=Limits(daily_requests=6)
+        tmp_path, clock, limits=Limits(daily_requests=2)
     )
 
     queue.state.enqueue(1)  # zadanie użytkownika (bez scheduled)
     queue.state.enqueue(2)
     queue.state.enqueue(3)
-    assert asyncio.run(queue.run_once()) == "done"  # 3/6
-    assert asyncio.run(queue.run_once()) == "done"  # 6/6
+    assert asyncio.run(queue.run_once()) == "done"  # 1/2
+    assert asyncio.run(queue.run_once()) == "done"  # 2/2
     result = asyncio.run(queue.run_once())  # limit wyczerpany
     assert result == "daily_requests"
     assert len(queue.state.queue) == 1  # jedno zadanie zostaje

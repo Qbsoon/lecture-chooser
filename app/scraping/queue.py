@@ -179,7 +179,7 @@ class RefreshQueue:
             used = await self._refresh(kid)
             now = self._now()
             if not was_scheduled:
-                self.state.record_request(used, now)
+                self.state.record_request(1, now)
             self.state.record_refresh(kid, now, scheduled=was_scheduled)
             if self.on_refreshed is not None:
                 try:
@@ -187,9 +187,6 @@ class RefreshQueue:
                 except Exception:  # callback nie może wywrócić workera
                     logger.exception("on_refreshed(kid=%d) rzucił wyjątek", kid)
             if was_scheduled and self._scheduled_batch_pause > 0:
-                # pauza co batch_size żądań — łagodne tempo jak bootstrap;
-                # batch_pause <= 0 (ustawienie v3, krok 3) wyłącza przerwy
-                # całkiem (zagęszone tempo cyklu tygodniowego)
                 self._scheduled_requests += used
                 while (
                     self._scheduled_requests >= self._next_scheduled_pause

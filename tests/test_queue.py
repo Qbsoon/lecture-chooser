@@ -170,12 +170,12 @@ def test_run_once_processes_job_and_records_state(tmp_path):
     assert result == "done"
     assert calls == [5]
     assert queue.state.queue == []
-    assert queue.state.requests_today == 3
+    assert queue.state.requests_today == 1
     assert queue.state.courses["5"]["refreshes_today"] == 1
     assert queue.state.courses["5"]["last_refreshed"] == clock().isoformat()
     assert 5 not in queue._running
     saved = json.loads(state_path(tmp_path).read_text(encoding="utf-8"))
-    assert saved["queue"] == [] and saved["requests_today"] == 3
+    assert saved["queue"] == [] and saved["requests_today"] == 1
 
 
 def test_run_once_waits_out_cooldown_then_runs(tmp_path):
