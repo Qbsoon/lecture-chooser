@@ -11,8 +11,8 @@ from pathlib import Path
 
 from app.core.parsers import parse_sale_table
 
-REPO = Path(__file__).resolve().parents[1]
-EXAMPLE = REPO / "example.html"
+FIX = Path(__file__).resolve().parent / "fixtures"
+EXAMPLE = FIX / "example.html"
 
 
 def _meetings():

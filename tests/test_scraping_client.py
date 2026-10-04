@@ -21,7 +21,6 @@ from app.scraping.client import (
 )
 
 FIX = Path(__file__).resolve().parent / "fixtures"
-REPO = Path(__file__).resolve().parents[1]
 
 WEEK_CHOOSER = (FIX / "week_chooser.html").read_text(encoding="utf-8")
 STAGE_PAGE = (FIX / "week_chooser_chosen.html").read_text(encoding="utf-8")
@@ -31,7 +30,7 @@ EMPTY_FACULTY = (FIX / "qlplan_empty_faculty_wid5545.html").read_text(encoding="
 PROGRAM_ETAP0 = (FIX / "qlprogram_etap0_kid2400_sem12.html").read_text(encoding="utf-8")
 WEEK_DATATAB2 = (FIX / "other_example_2.html").read_text(encoding="utf-8")
 # qlsale.html?op=10&zid=765356 — strona przedmiotu z terminarzem (v3, krok 3)
-SALE_PAGE = (REPO / "example.html").read_text(encoding="utf-8")
+SALE_PAGE = (FIX / "example.html").read_text(encoding="utf-8")
 
 
 def _data_rows(table_html: str) -> int:
