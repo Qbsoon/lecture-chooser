@@ -126,7 +126,7 @@ function weekOfDate(iso) {
   const day = new Date(`${iso}T12:00:00`);
   if (isNaN(day) || isNaN(base)) return null;
   base.setDate(base.getDate() - ((base.getDay() + 6) % 7));
-  const w = Math.round((day - base) / 86400000 / 7) + 1;
+  const w = Math.floor((day - base) / 86400000 / 7) + 1;
   return w >= 1 ? w : null;
 }
 

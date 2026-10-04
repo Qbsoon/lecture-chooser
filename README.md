@@ -116,11 +116,14 @@ planu studiów rozpoznawane przez `parse_note` (`app/core/parsers.py`):
 
 `settings.json` przechowuje ustawienia scrapingu (sekcja `scraping`).
 Zakres semestru (`data_first`/`data_last`) jest **wyliczany z danych**
-(`app/core/dataset.py`): min/max daty spotkań z terminarzy przedmiotów
-(`sales/{zid}.html`), w razie ich braku rozpoczęcie zajęć dydaktycznych
-z kalendarium (`app/data/calendary.html`), ostatecznie stała
-`DEFAULT_SEMESTER_START` w kodzie. Liczba tygodni wyliczana z `data_last`;
-w ostatecznym fallbacku stała `DEFAULT_SEMESTER_WEEKS` (w `ics.py`).
+(`app/core/dataset.py`): rozpoczęcie zajęć dydaktycznych z kalendarium
+(`app/data/calendary.html`) zaokrąglone W GÓRĘ do najbliższego poniedziałku
+(pierwszy pełny tydzień — zajęcia w „tygodniu zerowym" przed oficjalnym
+startem nie przesuwają początku semestru), w razie braku kalendarium
+min/max daty spotkań z terminarzy przedmiotów (`sales/{zid}.html`),
+ostatecznie stała `DEFAULT_SEMESTER_START` w kodzie. Liczba tygodni
+wyliczana z `data_last`; w ostatecznym fallbacku stała
+`DEFAULT_SEMESTER_WEEKS` (w `ics.py`).
 
 ## API
 

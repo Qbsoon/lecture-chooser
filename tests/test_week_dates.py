@@ -114,6 +114,19 @@ def test_week_of_date_basic():
     assert week_of_date("2026-10-04", SEMESTER_START) is None  # przed semestrem
 
 
+def test_week_of_date_end_of_week_is_floor_not_round():
+    # Daty późniejsze w tygodniu (pt–nd) muszą dawać ten sam tydzień co
+    # poniedziałek — to jest floor (//), NIE round. Lustro JS weekOfDate
+    # musi używać Math.floor, nie Math.round (inaczej pt–nd skaczą o +1).
+    # semester_start = 2026-10-05 (poniedziałek)
+    for iso in ("2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08",
+                "2026-10-09", "2026-10-10", "2026-10-11"):
+        assert week_of_date(iso, SEMESTER_START) == 1, f"{iso} should be week 1"
+    for iso in ("2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15",
+                "2026-10-16", "2026-10-17", "2026-10-18"):
+        assert week_of_date(iso, SEMESTER_START) == 2, f"{iso} should be week 2"
+
+
 def test_week_of_date_normalizes_start_to_monday():
     # semester_start wypadający w środę → liczymy od poniedziałku tego tygodnia
     assert week_of_date("2026-10-12", "2026-10-07") == 2
