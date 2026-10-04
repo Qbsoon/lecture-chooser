@@ -81,6 +81,7 @@ def _check_collisions(dataset: Dataset, selected: set[int]) -> list[str]:
     placed.sort(key=lambda pair: (pair[0].day, pair[0].start))
 
     warnings = []
+    seen_pairs: set[tuple[int, int]] = set()
     for i, (e1, o1) in enumerate(placed):
         for e2, o2 in placed[i + 1:]:
             if e2.day != e1.day or e2.start >= e1.end:
@@ -91,6 +92,10 @@ def _check_collisions(dataset: Dataset, selected: set[int]) -> list[str]:
                 # wpisy cykliczne muszą mieć wspólny tydzień cyklu; wpisy
                 # datowane („cykl nieregularny”) — wspólną datę/tydzień
                 continue
+            pair = (o1.zid, o2.zid) if o1.zid <= o2.zid else (o2.zid, o1.zid)
+            if pair in seen_pairs:
+                continue  # już ostrzegaliśmy o tej parze ofertów
+            seen_pairs.add(pair)
             warnings.append(
                 f"Kolizja godzinowa: „{_course_name(dataset, o1)}” "
                 f"({e1.start // 60:02d}:{e1.start % 60:02d}–{e1.end // 60:02d}:{e1.end % 60:02d}) "

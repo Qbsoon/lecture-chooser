@@ -389,21 +389,23 @@ function localStatus() {
   for (const zid of planned) {
     const info = courseIndex.get(zid);
     if (!info) continue;
-    for (const e of allEntries(info.offering)) placed.push({ e, name: info.course.name });
+    for (const e of allEntries(info.offering)) placed.push({ e, name: info.course.name, zid });
   }
   placed.sort((a, b) => a.e.day - b.e.day || a.e.start - b.e.start);
-  outer:
+  const seenPairs = new Set();
   for (let i = 0; i < placed.length; i++) {
-    const { e: e1, name: n1 } = placed[i];
+    const { e: e1, name: n1, zid: z1 } = placed[i];
     for (let j = i + 1; j < placed.length; j++) {
-      const { e: e2, name: n2 } = placed[j];
+      const { e: e2, name: n2, zid: z2 } = placed[j];
       if (e2.day !== e1.day || e2.start >= e1.end) break;
       if (e1.start >= e2.end) continue;
       if (!entriesMeet(e1, e2)) continue; // wpisy datowane vs cykliczne — jak na serwerze
+      const pair = z1 < z2 ? `${z1}:${z2}` : `${z2}:${z1}`;
+      if (seenPairs.has(pair)) continue; // już ostrzegaliśmy o tej parze ofertów
+      seenPairs.add(pair);
       warnings.push(
         `Kolizja: „${n1}” (${fmtTime(e1.start)}–${fmtTime(e1.end)}) z „${n2}” (${fmtTime(e2.start)}–${fmtTime(e2.end)})`
       );
-      continue outer; // jedna kolizja na parę wystarczy
     }
   }
 

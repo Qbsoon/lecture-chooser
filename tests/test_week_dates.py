@@ -18,6 +18,7 @@ import pytest
 from app.core.models import (
     Dataset,
     Offering,
+    Meeting,
     Part,
     Course,
     Category,
@@ -225,3 +226,42 @@ def test_no_collision_dated_with_other_parity_cycle():
         _entry(102, 0, 660, 780, cycle="B"),
     )
     assert w == []
+
+
+def _mtg(d, start, end, room=None):
+    return Meeting(date=d, room=room, start=start, end=end)
+
+
+def _offering_with_meetings(zid, meetings):
+    return Offering(
+        zid=zid, kind="laboratorium", group=f"Grupa {zid}",
+        points="Z/3", hours=30, teachers=[],
+        timetable=[], meetings=meetings,
+    )
+
+
+def _dataset_with_offerings(*offerings):
+    courses = [
+        Course(id=f"c{o.zid}", name=f"Przedmiot {o.zid}",
+               parts=[Part(kind=o.kind, offerings=[o])])
+        for o in offerings
+    ]
+    category = Category(id="cat1", name="Kategoria", courses=courses)
+    return Dataset(
+        categories=[category], series=[],
+        offerings={o.zid: o for o in offerings},
+        semester_start=SEMESTER_START, semester_weeks=15,
+    )
+
+
+def test_collision_deduplicated_per_offering_pair():
+    """Dwa offeringi z wieloma wspólnymi datami spotkań dają jedno ostrzeżenie
+    o kolizji, nie po jednym na każdą wspólną datę (de-duplikacja po parach)."""
+    times = 10 * 60, 12 * 60
+    dates = ["2026-10-05", "2026-10-12", "2026-10-19"]
+    o_a = _offering_with_meetings(1, [_mtg(d, *times) for d in dates])
+    o_b = _offering_with_meetings(2, [_mtg(d, *times) for d in dates])
+    ds = _dataset_with_offerings(o_a, o_b)
+    w = evaluate(ds, {1, 2})["warnings"]
+    assert len(w) == 1
+    assert "Kolizja" in w[0]
