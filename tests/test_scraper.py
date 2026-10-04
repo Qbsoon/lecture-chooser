@@ -5,8 +5,10 @@ pełny przebieg, wznowienie po ``course.json`` (0 żądań), wznowienie
 częściowe (pominięcie etapów kompletnych na dysku), kierunek „Brak
 danych” (bez pobierania rozkładu), etap z planem bez rozkładu
 (niepełny — nic nie zapisujemy, „szkoda dysku”), fallback per etap, gdy
-etap=0 nie działa (cichy reset formularza) oraz zbiór częściowy
-``only_etaps`` (bez ``course.json``/katalogu).
+etap=0 nie działa (cichy reset formularza), zbiór częściowy
+``only_etaps`` (bez ``course.json``/katalogu) oraz terminarze
+przedmiotów (v3, krok 3): pobranie per zid, wznawialność per zid,
+przedmiot bez opublikowanego terminarza.
 """
 from __future__ import annotations
 
@@ -15,14 +17,17 @@ import shutil
 
 from app.scraping.catalog import course_entry, load_catalog
 from app.scraping.client import ScrapingError, SelectOption, WeekPage, WrongStepError
-from app.scraping.scraper import scrape_course, week_page_html
+from app.scraping.scraper import scrape_course, plan_zids, week_page_html
 from app.scraping.storage import (
     catalog_path,
     course_dir,
     course_state_path,
+    has_sale,
     load_course_state,
     load_meta,
+    load_sale,
     load_table,
+    sales_dir,
     save_table,
 )
 
@@ -33,13 +38,43 @@ PLAN_2 = "<table id='plan2' class='tabelka'><tr class='tabhead'><td>PLAN 2</td><
 WEEK_1 = "<table id='datatab_1' class='tabelka'><tr class='tabhead'><td>TYDZIEŃ 1</td></tr></table>"
 WEEK_2 = "<table id='datatab_1' class='tabelka'><tr class='tabhead'><td>TYDZIEŃ 2</td></tr></table>"
 
+# plan/rozkład z zidami przedmiotów (v3, krok 3) — 101 w planie i rozkładzie,
+# 202 tylko w rozkładzie (wpis spoza planu, kategoria „Pozostałe”)
+PLAN_Z = (
+    "<table id='datatab_1' class='tabelka'>"
+    "<tr class='tabhead'><td>Przedmioty obligatoryjne</td></tr>"
+    "<tr class='tabhead'><td>Lp.</td><td>Przedmiot</td><td>Pkt</td>"
+    "<td>Godz.</td><td>Prowadzący</td></tr>"
+    "<tr class='s4row'><td>1</td>"
+    "<td><a href='qlsale.html?op=10&amp;zid=101'>Algebra</a> (wykład)</td>"
+    "<td>Z/5</td><td>30</td><td><a>prof. Kowalski</a></td></tr>"
+    "</table>"
+)
+WEEK_Z = (
+    "<table id='datatab_1' class='tabelka'>"
+    "<tr class='tabhead'><td>PONIEDZIAŁEK</td></tr>"
+    "<tr class='s4row'>"
+    "<td><a href='qlsale.html?op=2&amp;sid=WMP-1'>WMP-1</a></td>"
+    "<td>08:20 - 09:10</td><td>T</td>"
+    "<td><a href='qlsale.html?op=10&amp;zid=101'>Algebra</a> (wykład)</td>"
+    "<td><a>prof. Kowalski</a></td></tr>"
+    "<tr class='s4row'>"
+    "<td><a href='qlsale.html?op=2&amp;sid=WMP-1'>WMP-1</a></td>"
+    "<td>09:20 - 10:10</td><td>T</td>"
+    "<td><a href='qlsale.html?op=10&amp;zid=202'>Seminarium dodatkowe</a> (seminarium)</td>"
+    "<td><a>dr Nowak</a></td></tr>"
+    "</table>"
+)
+SALE_101 = "<html><table id='datatab_1' class='tabelka'>terminarz 101</table></html>"
+SALE_202 = "<html><table id='datatab_1' class='tabelka'>terminarz 202</table></html>"
+
 
 class FakeClient:
     """Stub klienta e-KUL: zlicza wywołania (żądania), zwraca ustalone dane."""
 
     def __init__(self, *, ra_opts=("1", "2"), etap_opts=("1", "2"), plans=None,
                  weeks=None, program_all_raises=None, etap_plans=None,
-                 etap_program_raises=None):
+                 etap_program_raises=None, sales=None):
         self.ra_opts = ra_opts
         self.etap_opts = etap_opts
         self.plans = plans  # [(etap, html)] albo None („pusty” qlprogram)
@@ -48,6 +83,7 @@ class FakeClient:
         self.program_all_raises = program_all_raises  # wyjątek z etap=0
         self.etap_plans = etap_plans or {}  # {etap: html | None}
         self.etap_program_raises = etap_program_raises
+        self.sales = sales or {}  # {zid: html | None} — None = brak terminarza
         self.calls = []
 
     async def get_stage_options(self, wid, kid):
@@ -72,6 +108,10 @@ class FakeClient:
     async def fetch_week(self, wid, kid, etap, ra=1):
         self.calls.append(("week", wid, kid, etap, ra))
         return self.weeks.get(etap)
+
+    async def fetch_sale(self, zid):
+        self.calls.append(("sale", zid))
+        return self.sales.get(zid)
 
 
 def _full_client():
@@ -133,6 +173,69 @@ def test_scrape_course_request_count(tmp_path):
     client = _full_client()
     asyncio.run(scrape_course(client, WID, KID, tmp_path))
     assert len(client.calls) == 4
+
+
+# -- terminarze przedmiotów (v3, krok 3) --------------------------------------
+
+def _z_client():
+    """Klient z planem/rozkładem z zidami 101 (plan) i 202 (tylko rozkład)."""
+    return FakeClient(
+        plans=[(1, PLAN_Z)],
+        weeks={1: WeekPage(tables={"datatab_1": WEEK_Z}, last_updated=None)},
+        sales={101: SALE_101, 202: SALE_202},
+    )
+
+
+def test_plan_zids_union_of_plan_and_week():
+    # plan daje 101, rozkład dodatkowo 202 (wpis spoza planu) — bez duplikatów
+    assert plan_zids(PLAN_Z, WEEK_Z) == [101, 202]
+
+
+def test_scrape_course_fetches_sales(tmp_path):
+    client = _z_client()
+    result = asyncio.run(scrape_course(client, WID, KID, tmp_path))
+
+    assert result.saved == [1]
+    assert result.sales_saved == 2
+    assert result.sales_skipped == 0
+    # surowy HTML per zid w layoucie magazynu (D2)
+    assert load_sale(tmp_path, KID, 1, 101) == SALE_101
+    assert load_sale(tmp_path, KID, 1, 202) == SALE_202
+    # 1 stage + 1 program + 1 week + 2 terminarze = 5 żądań
+    assert len(client.calls) == 5
+    assert ("sale", 101) in client.calls and ("sale", 202) in client.calls
+
+
+def test_sales_resumable_per_zid(tmp_path):
+    asyncio.run(scrape_course(_z_client(), WID, KID, tmp_path))
+    # przerwany zbiór: brak course.json, rozkładu etapu 1 i terminarza 202 —
+    # tylko terminarz 101 przetrwał na dysku, więc przy ponownym zbiorze
+    # etapu pomijamy 101, a 202 pobieramy ponownie
+    course_state_path(tmp_path, KID).unlink()
+    (course_dir(tmp_path, KID, 1) / "week.html").unlink()
+    (sales_dir(tmp_path, KID, 1) / "202.html").unlink()
+
+    fresh = _z_client()
+    result = asyncio.run(scrape_course(fresh, WID, KID, tmp_path))
+    assert result.saved == [1]
+    assert result.sales_saved == 1  # tylko 202
+    assert result.sales_skipped == 1  # 101 już na dysku
+    sale_calls = [c for c in fresh.calls if c[0] == "sale"]
+    assert sale_calls == [("sale", 202)]
+
+
+def test_sale_without_terminarz_not_saved(tmp_path):
+    # przedmiot bez opublikowanego terminarza (fetch_sale -> None) — stan
+    # pusty, nie błąd: nic nie zapisujemy
+    client = FakeClient(
+        plans=[(1, PLAN_Z)],
+        weeks={1: WeekPage(tables={"datatab_1": WEEK_Z}, last_updated=None)},
+        sales={101: None, 202: SALE_202},
+    )
+    result = asyncio.run(scrape_course(client, WID, KID, tmp_path))
+    assert result.sales_saved == 1
+    assert not has_sale(tmp_path, KID, 1, 101)
+    assert has_sale(tmp_path, KID, 1, 202)
 
 
 # -- wznowienie ---------------------------------------------------------------

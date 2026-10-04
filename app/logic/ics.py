@@ -2,9 +2,11 @@
 
 Terminy w rozkładzie opisują cykl (T/A/B/C/D/1-4), a nie konkretne daty,
 więc rozwijamy je na wydarzenia licząc tygodnie od poniedziałku pierwszego
-tygodnia semestru (`semester_start` w settings.json). Wyjątkiem są wpisy
-„w cyklu nieregularnym” (pole ``date``): te trafiają do kalendarza jako
-pojedyncze wydarzenia w swojej konkretnej dacie.
+tygodnia semestru — zakres semestru jest wyliczany z danych przez
+``build_dataset`` (terminarze → kalendarium → ``DEFAULT_SEMESTER_START``;
+v3, krok 4 / D3). Wyjątkiem są wpisy „w cyklu nieregularnym” (pole
+``date``): te trafiają do kalendarza jako pojedyncze wydarzenia w swojej
+konkretnej dacie.
 """
 from __future__ import annotations
 

@@ -1,11 +1,20 @@
-"""Składanie datasetu: plan studiów + rozkład zajęć + ustawienia."""
+"""Składanie datasetu: plan studiów + rozkład zajęć + terminarze + kalendarium."""
 from __future__ import annotations
 
 import logging
+from datetime import date
 from pathlib import Path
 
-from .models import Category, Course, Dataset, Offering, Part
-from .parsers import parse_plan_table, parse_week_table
+from .calendary import Calendary, parse_calendary
+from .models import (
+    Category,
+    Course,
+    Dataset,
+    Offering,
+    Part,
+    semester_monday,
+)
+from .parsers import parse_plan_table, parse_sale_table, parse_week_table
 from .source import (
     DataLoader,
     ScrapedDataLoader,
@@ -20,10 +29,16 @@ UNASSIGNED_CATEGORY_NAME = "Pozostałe zajęcia (spoza planu studiów)"
 
 
 def build_dataset(loader: DataLoader) -> Dataset:
-    """Buduje spięty dataset z danych wczytanych przez loader."""
+    """Buduje spięty dataset z danych wczytanych przez loader.
+
+    Zakres semestru (``semester_start``/``semester_weeks``) jest wyliczany
+    z danych (v3, krok 4 / D3): min/max daty spotkań z terminarzy
+    przedmiotów, w razie ich braku rozpoczęcie zajęć dydaktycznych
+    z kalendarium, ostatecznie ``DEFAULT_SEMESTER_START`` w kodzie.
+    ``settings.json`` nie ma już tych parametrów.
+    """
     categories, series = parse_plan_table(loader.load_plan())
     entries = parse_week_table(loader.load_week())
-    settings = loader.load_settings()
 
     # Ograniczenia (tryby/limity kategorii i serii) wynikają w całości
     # z notek w tabeli planu — patrz parse_note w parsers.py.
@@ -66,14 +81,100 @@ def build_dataset(loader: DataLoader) -> Dataset:
             entry.day,
         )
 
+    # Terminarze przedmiotów (v3, krok 4): spotkania z konkretnymi datami
+    # spięte po zid z plików sales/{zid}.html (D2).
+    _attach_meetings(loader, offerings)
+
+    data_first, data_last = _data_range(offerings)
+    semester_start = _semester_start(loader, data_first)
+    semester_weeks = _semester_weeks(data_last, semester_start)
+
     return Dataset(
         categories=categories,
         series=series,
         offerings=offerings,
         unassigned=dropped,
-        semester_start=settings.get("semester_start"),
-        semester_weeks=settings.get("semester_weeks"),
+        data_first=data_first,
+        data_last=data_last,
+        semester_start=semester_start,
+        semester_weeks=semester_weeks,
     )
+
+
+def _load_sale_html(loader: DataLoader, zid: int) -> str | None:
+    """Surowy HTML terminarza zidu; None, gdy loader go nie obsługuje/brak pliku."""
+    load = getattr(loader, "load_sale", None)
+    if load is None:
+        return None
+    try:
+        return load(zid)
+    except OSError:
+        return None
+
+
+def _attach_meetings(loader: DataLoader, offerings: dict[int, Offering]) -> None:
+    """Spięcie terminarzy z offeringami po zid (w miejscu)."""
+    for zid, offering in offerings.items():
+        html = _load_sale_html(loader, zid)
+        if not html:
+            continue
+        try:
+            offering.meetings = parse_sale_table(html)
+        except ValueError as exc:
+            logger.warning("Terminarz przedmiotu zid=%s pominięty: %s", zid, exc)
+
+
+def _data_range(offerings: dict[int, Offering]) -> tuple[str | None, str | None]:
+    """(data_first, data_last) z dat spotkań terminarzy; (None, None) bez terminarzy."""
+    dates = [m.date for o in offerings.values() for m in o.meetings]
+    if not dates:
+        return None, None
+    return min(dates), max(dates)
+
+
+def _load_calendary(loader: DataLoader) -> Calendary | None:
+    load = getattr(loader, "load_calendary", None)
+    if load is None:
+        return None
+    try:
+        html = load()
+    except OSError:
+        return None
+    return parse_calendary(html) if html else None
+
+
+def _semester_start(loader: DataLoader, data_first: str | None) -> str:
+    """Poniedziałek 1. tygodnia semestru wg hierarchii źródeł (D3).
+
+    1. terminarze — poniedziałek tygodnia pierwszego spotkania;
+    2. kalendarium — rozpoczęcie zajęć dydaktycznych: semestr zimowy
+       dla nieparzystych etapów, letni dla parzystych (kierunki niemal
+       zawsze startują od semestru zimowego); w razie braku — cokolwiek jest;
+    3. ``DEFAULT_SEMESTER_START`` w kodzie (ostatnia deska ratunku).
+    """
+    if data_first:
+        return semester_monday(data_first).isoformat()
+    cal = _load_calendary(loader)
+    if cal is not None:
+        etap = getattr(loader, "etap", None)
+        if etap is not None and etap % 2 == 0:
+            start = cal.summer_start or cal.winter_start
+        else:
+            start = cal.winter_start or cal.summer_start
+        if start is not None:
+            return semester_monday(start.isoformat()).isoformat()
+    return semester_monday(None).isoformat()
+
+
+def _semester_weeks(data_last: str | None, semester_start: str | None) -> int | None:
+    """Liczba tygodni semestru z zakresu danych; None, gdy zakres nieznany."""
+    if not data_last or not semester_start:
+        return None
+    try:
+        last = date.fromisoformat(data_last)
+    except ValueError:
+        return None
+    return (last - semester_monday(semester_start)).days // 7 + 1
 
 
 def _build_unassigned_category(unassigned: list) -> Category | None:

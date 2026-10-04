@@ -170,6 +170,16 @@ def datatabs(html: str) -> dict[str, str]:
     return {t["id"]: str(t) for t in _soup(html).find_all("table", id=_DATATAB_RE)}
 
 
+def sale_terminarz_html(html: str) -> str | None:
+    """Surowy HTML strony przedmiotu, jeśli ma terminarz; ``None`` gdy brak.
+
+    Strona przedmiotu (qlsale op=10) ma terminarz, gdy zawiera tabelę
+    ``datatab_N`` (Data/Dzień/Sala/Godz./Forma). e-KUL zwraca 200 także
+    dla przedmiotu bez opublikowanego terminarza — walidacja strukturalna.
+    """
+    return html if datatabs(html) else None
+
+
 def last_updated(html: str) -> str | None:
     """„Ostatnia aktualizacja: YYYY-MM-DD HH:MM" ze stopki strony (lub None)."""
     m = _LAST_UPDATED_RE.search(_soup(html).get_text(" ", strip=True))
@@ -407,3 +417,14 @@ class EkulClient:
                 "brak tabel datatab (cichy reset formularza?)"
             )
         return WeekPage(tables=tables, last_updated=last_updated(html))
+
+    async def fetch_sale(self, zid: int) -> str | None:
+        """Terminarz strony przedmiotu (qlsale.html?op=10&zid=…) — surowy HTML.
+
+        Zwraca ``None``, gdy przedmiot nie ma opublikowanego terminarza
+        (strona bez tabel ``datatab`` — e-KUL zawsze zwraca 200, także
+        dla nieprawidłowego zid). Terminarze zbierane w zwykłym przepływie
+        kierunku (v3, krok 3) — po planie i rozkładzie etapu.
+        """
+        html = await self._get("/qlsale.html", {"op": 10, "zid": zid})
+        return sale_terminarz_html(html)

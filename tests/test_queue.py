@@ -85,6 +85,22 @@ def make_queue(
     return queue, clock, sleeper, calls
 
 
+def test_scheduled_batch_pause_zero_disables_pauses(tmp_path):
+    """batch_pause=0 (ustawienie v3, krok 3) — cykl tygodniowy bez przerw."""
+    refresh, calls = fake_refresh(used=80)  # przekracza batch_size=50
+    clock = FakeClock()
+    sleeper = FakeSleep(clock)
+    state = ScrapeState(tmp_path)
+    state.enqueue(1, scheduled=True)
+    queue = RefreshQueue(
+        state, refresh, Limits(), now=clock, sleep=sleeper,
+        scheduled_batch_size=50, scheduled_batch_pause=0,
+    )
+    assert asyncio.run(queue.run_once()) == "done"
+    assert calls == [1]
+    assert sleeper.calls == []  # żadnej przerwy co N żądań
+
+
 # -- bramka request_refresh (pod API z kroku 8) ------------------------------
 
 

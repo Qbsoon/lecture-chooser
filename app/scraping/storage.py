@@ -10,6 +10,7 @@ Layout (todo.md, pkt 2 i krok 4)::
                 plan.html         # tabela planu studiów semestru (qlprogram)
                 week.html         # tabele rozkładu datatab_1/2 (qlplan, etap)
                 meta.json         # parametry żądania, czas, „Ostatnia aktualizacja”
+                sales/{zid}.html  # surowe strony terminarzy przedmiotów (v3, D2)
 
 Etap numerowany jest jak semestr (``etap=N`` ≈ semestr N — zweryfikowane
 na żywo: SI I st., semestr 6, to ``datatab_6``/``etap=6``).
@@ -31,6 +32,7 @@ COURSE_FILE = "course.json"
 PLAN_FILE = "plan.html"
 WEEK_FILE = "week.html"
 META_FILE = "meta.json"
+SALES_DIR = "sales"
 
 _TABLE_NAMES = ("plan", "week")
 
@@ -112,6 +114,36 @@ def purge_course(data_dir: str | Path, kid: int, etap: int) -> None:
     d = course_dir(data_dir, kid, etap)
     if d.is_dir():
         shutil.rmtree(d)
+
+
+# -- terminarze przedmiotów (sales/{zid}.html, v3 krok 3 / D2) ----------------
+
+def sales_dir(data_dir: str | Path, kid: int, etap: int) -> Path:
+    """Katalog terminarzy etapu: ``{data_dir}/scraped/{kid}/{etap}/sales``."""
+    return course_dir(data_dir, kid, etap) / SALES_DIR
+
+
+def save_sale(data_dir: str | Path, kid: int, etap: int, zid: int, html: str) -> Path:
+    """Zapisuje surową stronę terminarza przedmiotu; zwraca ścieżkę.
+
+    Surowy HTML per zid (decyzja D2) — spójnie z ``plan.html``/``week.html``:
+    magazyn trzyma surowe odpowiedzi serwera, parsowanie robi dopiero
+    budowa datasetu (możliwy re-pars po zmianach parsera bez nowych żądań).
+    """
+    path = sales_dir(data_dir, kid, etap) / f"{zid}.html"
+    atomic_write(path, html)
+    return path
+
+
+def load_sale(data_dir: str | Path, kid: int, etap: int, zid: int) -> str | None:
+    """Zawartość terminarza przedmiotu albo ``None``, gdy plik nie istnieje."""
+    path = sales_dir(data_dir, kid, etap) / f"{zid}.html"
+    return path.read_text(encoding="utf-8") if path.is_file() else None
+
+
+def has_sale(data_dir: str | Path, kid: int, etap: int, zid: int) -> bool:
+    """Czy terminarz przedmiotu leży na dysku (wznawialność per zid)."""
+    return (sales_dir(data_dir, kid, etap) / f"{zid}.html").is_file()
 
 
 # -- meta.json ---------------------------------------------------------------

@@ -16,10 +16,12 @@ from app.scraping.client import (
     is_login_page,
     last_updated,
     parse_select_options,
+    sale_terminarz_html,
     semester_tables,
 )
 
 FIX = Path(__file__).resolve().parent / "fixtures"
+REPO = Path(__file__).resolve().parents[1]
 
 WEEK_CHOOSER = (FIX / "week_chooser.html").read_text(encoding="utf-8")
 STAGE_PAGE = (FIX / "week_chooser_chosen.html").read_text(encoding="utf-8")
@@ -28,6 +30,8 @@ NO_DATA_PAGE = (FIX / "qlplan_no_data_kid4382.html").read_text(encoding="utf-8")
 EMPTY_FACULTY = (FIX / "qlplan_empty_faculty_wid5545.html").read_text(encoding="utf-8")
 PROGRAM_ETAP0 = (FIX / "qlprogram_etap0_kid2400_sem12.html").read_text(encoding="utf-8")
 WEEK_DATATAB2 = (FIX / "other_example_2.html").read_text(encoding="utf-8")
+# qlsale.html?op=10&zid=765356 — strona przedmiotu z terminarzem (v3, krok 3)
+SALE_PAGE = (REPO / "example.html").read_text(encoding="utf-8")
 
 
 def _data_rows(table_html: str) -> int:
@@ -99,6 +103,20 @@ def test_no_data_page_detected_structurally():
 def test_empty_faculty_is_not_no_data_page():
     """„Brak danych" w tabelce Informacja ≠ span.trash — nie mylić stanów."""
     assert has_no_data(EMPTY_FACULTY) is False
+
+
+# ---- qlsale: terminarz strony przedmiotu (v3, krok 3) -----------------------
+
+
+def test_sale_terminarz_html_present():
+    # strona przedmiotu z terminarzem (tabela datatab) — zwracamy surowy HTML
+    assert sale_terminarz_html(SALE_PAGE) is SALE_PAGE
+
+
+def test_sale_terminarz_html_absent():
+    # przedmiot bez opublikowanego terminarza (bez tabel datatab) — stan pusty
+    assert sale_terminarz_html(NO_DATA_PAGE) is None
+    assert sale_terminarz_html("<html><p>opis zajęć bez terminarza</p></html>") is None
 
 
 # ---- logowanie -------------------------------------------------------------

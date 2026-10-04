@@ -186,8 +186,10 @@ class RefreshQueue:
                     self.on_refreshed(kid)
                 except Exception:  # callback nie może wywrócić workera
                     logger.exception("on_refreshed(kid=%d) rzucił wyjątek", kid)
-            if was_scheduled:
-                # pauza co batch_size żądań — łagodne tempo jak bootstrap
+            if was_scheduled and self._scheduled_batch_pause > 0:
+                # pauza co batch_size żądań — łagodne tempo jak bootstrap;
+                # batch_pause <= 0 (ustawienie v3, krok 3) wyłącza przerwy
+                # całkiem (zagęszone tempo cyklu tygodniowego)
                 self._scheduled_requests += used
                 while (
                     self._scheduled_requests >= self._next_scheduled_pause

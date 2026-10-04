@@ -305,11 +305,13 @@ async def cmd_bootstrap(args: argparse.Namespace) -> int:
                 f"brak-danych={result.no_data} (łącznie żądań: {client.request_count})"
             )
 
-            # przerwa co batch_size żądań (łagodne tempo z settings.json)
-            while client.request_count >= next_pause_at:
-                print(f"[pauza] {client.request_count} żądań — {batch_pause:.0f}s")
-                await asyncio.sleep(batch_pause)
-                next_pause_at += batch_size
+            # przerwa co batch_size żądań (łagodne tempo z settings.json);
+            # batch_pause <= 0 (ustawienie v3) wyłącza przerwy całkiem
+            if batch_pause > 0:
+                while client.request_count >= next_pause_at:
+                    print(f"[pauza] {client.request_count} żądań — {batch_pause:.0f}s")
+                    await asyncio.sleep(batch_pause)
+                    next_pause_at += batch_size
 
         print(
             f"[podsumowanie] kierunki={len(jobs)} etapy-pobrane={totals['saved']} "

@@ -19,6 +19,8 @@ from typing import Protocol
 SCRAPED_DIR = "scraped"
 PLAN_FILE_NAME = "plan.html"
 WEEK_FILE_NAME = "week.html"
+SALES_DIR_NAME = "sales"  # terminarze przedmiotów: sales/{zid}.html (v3, D2)
+CALENDARY_FILE_NAME = "calendary.html"
 SETTINGS_FILE = "settings.json"
 
 # Tryb „ręczny” (FileDataLoader): informatyka II st., 1 semestr
@@ -63,14 +65,32 @@ def _load_settings(dirs: list[Path]) -> dict:
     return {}
 
 
+def _find_optional(dirs: list[Path], relpath: str) -> str | None:
+    """Zawartość pliku, jeśli istnieje w którymś z katalogów; inaczej None."""
+    for directory in dirs:
+        path = directory / relpath
+        if path.is_file():
+            return path.read_text(encoding="utf-8")
+    return None
+
+
 class DataLoader(Protocol):
-    """Protokół źródła danych (plan studiów, rozkład zajęć, ustawienia)."""
+    """Protokół źródła danych (plan studiów, rozkład zajęć, ustawienia).
+
+    ``load_sale``/``load_calendary`` (v3, krok 4) zwracają ``None``, gdy
+    pliku nie ma — terminarz przedmiotu i kalendarium są opcjonalne
+    (kierunek bez terminarzy działa na cyklach jak dotychczas).
+    """
 
     def load_plan(self) -> str: ...
 
     def load_week(self) -> str: ...
 
     def load_settings(self) -> dict: ...
+
+    def load_sale(self, zid: int) -> str | None: ...
+
+    def load_calendary(self) -> str | None: ...
 
 
 class FileDataLoader:
@@ -103,6 +123,13 @@ class FileDataLoader:
     def load_settings(self) -> dict:
         return _load_settings(self._dirs)
 
+    def load_sale(self, zid: int) -> str | None:
+        """Terminarz przedmiotu domyślnego kierunku (scraped/6089/1/sales)."""
+        return _find_optional(self._dirs, f"{SCRAPED_COURSE}/{SALES_DIR_NAME}/{zid}.html")
+
+    def load_calendary(self) -> str | None:
+        return _find_optional(self._dirs, CALENDARY_FILE_NAME)
+
 
 class ScrapedDataLoader:
     """Wczytuje tabele konkretnego kierunku/semestru ze ``scraped/``.
@@ -114,6 +141,9 @@ class ScrapedDataLoader:
     def __init__(self, data_dir: str | Path | None, kid: int, etap: int) -> None:
         self._dirs = _candidate_dirs(data_dir)
         self._course_dir = Path(SCRAPED_DIR) / str(kid) / str(etap)
+        # etap (semestr w programie) — potrzebny do wyboru rozpoczęcia
+        # semestru zimowego/letniego z kalendarium (v3, krok 4 / D3)
+        self.etap = int(etap)
 
     def _find(self, filename: str) -> Path:
         for directory in self._dirs:
@@ -133,6 +163,13 @@ class ScrapedDataLoader:
 
     def load_settings(self) -> dict:
         return _load_settings(self._dirs)
+
+    def load_sale(self, zid: int) -> str | None:
+        """Terminarz przedmiotu etapu: scraped/{kid}/{etap}/sales/{zid}.html."""
+        return _find_optional(self._dirs, str(self._course_dir / SALES_DIR_NAME / f"{zid}.html"))
+
+    def load_calendary(self) -> str | None:
+        return _find_optional(self._dirs, CALENDARY_FILE_NAME)
 
 
 def list_available_courses(

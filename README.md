@@ -105,8 +105,12 @@ planu studiów rozpoznawane przez `parse_note` (`app/core/parsers.py`):
 - „do wyboru 1 specjalność” — notka serii: wybierz 1 specjalność,
 - sekcja bez notki — bez ograniczeń liczby („brak limitu”).
 
-`settings.json` przechowuje parametry semestru (`semester_start`,
-`semester_weeks`) oraz ustawienia scrapingu (sekcja `scraping`).
+`settings.json` przechowuje ustawienia scrapingu (sekcja `scraping`).
+Parametry semestru (`semester_start`, `semester_weeks`) są **wyliczane z danych**
+(`app/core/dataset.py`): min/max daty spotkań z terminarzy przedmiotów
+(`sales/{zid}.html`), w razie ich braku rozpoczęcie zajęć dydaktycznych
+z kalendarium (`app/data/calendary.html`), ostatecznie stała
+`DEFAULT_SEMESTER_START` w kodzie.
 
 ## API
 

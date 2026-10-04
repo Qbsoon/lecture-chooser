@@ -49,11 +49,15 @@ class StubLoader:
     def load_settings(self) -> dict:
         return self._settings
 
+    def load_sale(self, zid: int) -> str | None:
+        return None  # bez terminarzy — dataset działa na cyklach
+
+    def load_calendary(self) -> str | None:
+        return None
+
 
 def _dataset():
-    return build_dataset(
-        StubLoader(OTHER, OTHER2, {"semester_start": "2026-10-05", "semester_weeks": 15})
-    )
+    return build_dataset(StubLoader(OTHER, OTHER2, {}))
 
 
 def _o(points: str) -> Offering:

@@ -4,7 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
-# Poniedziałek 1. tygodnia semestru (domyślny start z settings.json).
+# Poniedziałek 1. tygodnia semestru — ostatnia deska ratunku, gdy ani
+# terminarze, ani kalendarium nie dają zakresu semestru (v3, krok 4 / D3).
 DEFAULT_SEMESTER_START = "2026-10-05"
 
 # Legenda oznaczeń cyklu zajęć (używana też w API/interfejsie).
@@ -53,7 +54,7 @@ def cycles_overlap(cycle_a: str, cycle_b: str) -> bool:
 
 
 def semester_monday(semester_start: str | None) -> date:
-    """Poniedziałek 1. tygodnia semestru (normalizacja ``settings.semester_start``)."""
+    """Poniedziałek 1. tygodnia semestru (normalizacja daty startu do poniedziałku)."""
     try:
         start = date.fromisoformat(str(semester_start or DEFAULT_SEMESTER_START))
     except ValueError:
@@ -176,6 +177,9 @@ class Offering:
     course_id: str | None = None
     category_id: str | None = None
     timetable: list[TimetableEntry] = field(default_factory=list)
+    # Terminarz strony przedmiotu (sales/{zid}.html, v3 krok 4): konkretne
+    # daty spotkań — prawdziwsze niż rozwijanie cykli od semester_start.
+    meetings: list[Meeting] = field(default_factory=list)
 
     @property
     def label(self) -> str:
@@ -196,6 +200,7 @@ class Offering:
             "hours": self.hours,
             "teachers": self.teachers,
             "timetable": [e.to_dict() for e in self.timetable],
+            "meetings": [m.to_dict() for m in self.meetings],
         }
 
 
@@ -299,8 +304,15 @@ class Dataset:
     series: list[Series]
     offerings: dict[int, Offering] = field(default_factory=dict)
     unassigned: list[TimetableEntry] = field(default_factory=list)  # bez zid lub nieznany zid
-    semester_start: str | None = None  # ISO daty poniedziałku 1. tygodnia semestru (eksport .ics)
-    semester_weeks: int | None = None  # ile tygodni semestru obejmuje eksport .ics
+    # Zakres semestru wyliczany z danych (v3, krok 4): min/max daty spotkań
+    # z terminarzy przedmiotów; None, gdy kierunek nie ma terminarzy.
+    data_first: str | None = None
+    data_last: str | None = None
+    # Poniedziałek 1. tygodnia semestru + liczba tygodni — wyliczane z danych
+    # (hierarchia: terminarze → kalendarium → DEFAULT_SEMESTER_START w kodzie;
+    # settings.json nie ma już tych parametrów — decyzja D3).
+    semester_start: str | None = None
+    semester_weeks: int | None = None
 
     def category_by_id(self, cat_id: str) -> Category | None:
         return next((c for c in self.categories if c.id == cat_id), None)
@@ -311,6 +323,8 @@ class Dataset:
             "series": [s.to_dict() for s in self.series],
             "unassigned": [e.to_dict() for e in self.unassigned],
             "cycles": CYCLES_LEGEND,
+            "data_first": self.data_first,
+            "data_last": self.data_last,
             "semester_start": self.semester_start,
             "semester_weeks": self.semester_weeks,
         }
