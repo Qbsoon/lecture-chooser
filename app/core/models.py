@@ -99,7 +99,8 @@ def offering_entries(offering: "Offering") -> list["TimetableEntry"]:
             out.append(TimetableEntry(
                 zid=offering.zid, day=d.weekday(),
                 start=m.start, end=m.end, cycle="T",
-                room=m.room, online=False, hybrid=False,
+                room=m.room, online=m.online,
+                hybrid=any(e.hybrid for e in offering.timetable),
                 subject="", kind=offering.kind, group=offering.group,
                 teacher="", date=m.date,
             ))
@@ -176,6 +177,7 @@ class Meeting:
     room: str | None
     start: int  # minuty od północy
     end: int
+    online: bool = False  # <span class="online">zdalne</span> w kolumnie Forma zajęć
 
     def to_dict(self) -> dict:
         return {
@@ -183,6 +185,7 @@ class Meeting:
             "room": self.room,
             "start": self.start,
             "end": self.end,
+            "online": self.online,
         }
 
 

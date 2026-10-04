@@ -470,6 +470,10 @@ def parse_sale_table(html: str) -> list[Meeting]:
             room_link = tds[2].find("a")
             room = (_text(room_link) if room_link else _text(tds[2])) or None
 
+            # Forma zajęć (tds[4]): <span class="online">zdalne</span> vs stacjonarne
+            form_cell = tds[4] if len(tds) > 4 else None
+            online = form_cell is not None and form_cell.find("span", class_="online") is not None
+
             day_cell = _text(tds[1]).upper()
             if day_cell in DAY_NAMES and DAY_NAMES[day_cell] != meeting_date.weekday():
                 log.warning(
@@ -485,6 +489,7 @@ def parse_sale_table(html: str) -> list[Meeting]:
                     room=room,
                     start=int(times[0][0]) * 60 + int(times[0][1]),
                     end=int(times[1][0]) * 60 + int(times[1][1]),
+                    online=online,
                 )
             )
     return meetings

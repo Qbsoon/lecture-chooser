@@ -57,3 +57,41 @@ def test_sale_table_missing_table_raises():
 
     with pytest.raises(ValueError):
         parse_sale_table("<html><body><p>brak terminarza</p></body></html>")
+
+
+# Hybrydowy terminarz z naprzemiennymi formami: zdalne / stacjonarne
+# (jak 758196 — Bezpieczeństwo danych, seminarium).
+HYBRID_SALE = """
+<html><body><table class="tabelka" id="datatab_1">
+<tr class="tabhead"><td>Data</td><td>Dzień</td><td>Sala</td><td>Godz.od-do</td><td>Forma zajęć</td></tr>
+<tr class="s4row s4row_0"><td>2026-10-05</td><td>poniedziałek</td><td><a href="#">WMP-604</a></td>
+<td>09:10 - 10:50</td><td align="center"><span class="online">zdalne</span></td></tr>
+<tr class="s4row s4row_0"><td>2026-10-12</td><td>poniedziałek</td><td><a href="#">WMP-604</a></td>
+<td>09:10 - 10:50</td><td align="center">stacjonarne</td></tr>
+</table></body></html>
+"""
+
+
+def test_sale_table_online_detection():
+    """Forma zajęć z <span class='online'>zdalne</span> -> Meeting.online=True."""
+    meetings = parse_sale_table(HYBRID_SALE)
+    assert len(meetings) == 2
+    assert meetings[0].online is True   # zdalne
+    assert meetings[1].online is False  # stacjonarne
+    # sala jest zawsze obecna — nawet dla spotkań zdalnych
+    assert meetings[0].room == "WMP-604"
+    assert meetings[1].room == "WMP-604"
+
+
+def test_sale_table_no_form_column_defaults_offline():
+    """Tabela bez kolumny Forma zajęć (4 kolumny) -> online=False."""
+    html = """
+    <html><body><table class="tabelka" id="datatab_1">
+    <tr class="tabhead"><td>Data</td><td>Dzień</td><td>Sala</td><td>Godz.od-do</td></tr>
+    <tr class="s4row s4row_0"><td>2026-10-05</td><td>poniedziałek</td><td><a href="#">Sala 1</a></td>
+    <td>09:10 - 10:50</td></tr>
+    </table></body></html>
+    """
+    meetings = parse_sale_table(html)
+    assert len(meetings) == 1
+    assert meetings[0].online is False

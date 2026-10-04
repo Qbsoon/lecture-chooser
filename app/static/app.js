@@ -754,10 +754,14 @@ function entryInViewWeek(e, w) {
 function meetingToEntry(m, offering) {
   const d = new Date(`${m.date}T12:00:00`);
   const day = (d.getDay() + 6) % 7; // JS 0=Nd..6=So → 0=Pn..6=Nd
+  const tt = offering.timetable || [];
+  const mtgs = offering.meetings || [];
+  const hybrid = tt.some(e => e.hybrid) ||
+      (mtgs.some(x => x.online) && mtgs.some(x => !x.online));
   return {
     day, start: m.start, end: m.end,
     cycle: "T", room: m.room,
-    online: false, hybrid: false,
+    online: !!m.online, hybrid,
     teacher: (offering.teachers || []).join(", "),
     date: m.date,
   };

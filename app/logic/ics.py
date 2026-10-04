@@ -84,15 +84,21 @@ def build_ics(dataset: Dataset, zids: set[int]) -> str:
         # z timetable, gdy terminarza brak.
         if offering.meetings:
             teacher = ", ".join(offering.teachers)
+            is_hybrid = any(e.hybrid for e in offering.timetable)
             for m in offering.meetings:
                 try:
                     day = date.fromisoformat(m.date)
                 except ValueError:
                     continue
-                location = m.room or ""
+                if m.online:
+                    location = "ONLINE" + (" — hybrydowe" if is_hybrid else "")
+                else:
+                    location = (m.room or "") + (" — hybrydowe" if is_hybrid else "")
                 desc = [offering.kind, category.name]
                 if teacher:
                     desc.append(teacher)
+                if is_hybrid:
+                    desc.append("zajęcia hybrydowe")
                 events.append((
                     (day, m.start),
                     f"{zid}-{m.date}-{m.start}@lecture-chooser",

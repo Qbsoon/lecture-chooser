@@ -145,3 +145,47 @@ def test_ics_meetings_fallback_to_timetable_when_no_meetings():
     ics = build_ics(ds, {200})
     # fallback na cykl T z timetable = 15 wydarzeń
     assert ics.count("BEGIN:VEVENT") == 15
+
+
+def _dataset_hybrid_meetings():
+    """Dataset z offeringiem hybrydowym (timetable.hybrid=True) + terminarz
+    z mieszanymi formami: 1 zdalne, 1 stacjonarne."""
+    entry = TimetableEntry(
+        zid=300, day=0, start=9 * 60 + 10, end=10 * 60 + 50, cycle="T",
+        room="WMP-604", online=False, hybrid=True, subject="Bezpieczeństwo",
+        kind="seminarium", group=None, teacher="prof. dr hab. Test",
+    )
+    meetings = [
+        Meeting(date="2026-10-05", room="WMP-604", start=9 * 60 + 10, end=10 * 60 + 50, online=True),
+        Meeting(date="2026-10-12", room="WMP-604", start=9 * 60 + 10, end=10 * 60 + 50, online=False),
+    ]
+    offering = Offering(
+        zid=300, kind="seminarium", group=None,
+        points="Z/3", hours=30, teachers=["prof. dr hab. Test"],
+        timetable=[entry], meetings=meetings,
+    )
+    part = Part(kind="seminarium", offerings=[offering])
+    course = Course(id="c3", name="Bezpieczeństwo danych", parts=[part])
+    category = Category(id="cat3", name="Kategoria", courses=[course])
+    return Dataset(
+        categories=[category], series=[], offerings={300: offering},
+        semester_start="2026-10-05", semester_weeks=15,
+    )
+
+
+def test_ics_hybrid_meetings_online_location():
+    """Spotkanie online w ICS ma lokalizację ONLINE (nie salę); stacjonarne — salę."""
+    ics = build_ics(_dataset_hybrid_meetings(), {300})
+    assert ics.count("BEGIN:VEVENT") == 2
+    lines = ics.split("\r\n")
+    locations = [l for l in lines if l.startswith("LOCATION:")]
+    # spotkanie online -> ONLINE — hybrydowe
+    assert any("ONLINE" in l for l in locations)
+    # spotkanie stacjonarne -> WMP-604 — hybrydowe
+    assert any("WMP-604" in l for l in locations)
+
+
+def test_ics_hybrid_meetings_description():
+    """Hybrydowy offering z terminarzem — opis zawiera „zajęcia hybrydowe”."""
+    ics = build_ics(_dataset_hybrid_meetings(), {300})
+    assert "hybrydowe" in ics
