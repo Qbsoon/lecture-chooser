@@ -844,7 +844,18 @@ function renderCalendar() {
     }
   }
 
+  // W trybie "obecny" dołącz dni z wydarzeniami kalendarza (dni wolne,
+  // uroczystości) — nawet gdy w danym dniu nie ma zajęć.
+  const monday = calMode === "current" ? weekMonday(displayedWeek()) : null;
   const daysUsed = [...new Set(entries.map((x) => x.e.day))].sort((a, b) => a - b);
+  if (monday && calDayMap) {
+    for (let d = 0; d < 7; d++) {
+      const dt = new Date(monday);
+      dt.setDate(dt.getDate() + d);
+      if (calDayMap[isoDate(dt)] && !daysUsed.includes(d)) daysUsed.push(d);
+    }
+    daysUsed.sort((a, b) => a - b);
+  }
   const days = daysUsed.length ? daysUsed : [0, 1, 2, 3, 4];
 
   let minH = 8 * 60, maxH = 20 * 60;
@@ -861,7 +872,6 @@ function renderCalendar() {
 
   head.append(h("div", { class: "cal-corner" }));
   // W trybie "obecny" do nazwy dnia doklejamy konkretną datę (dd.MM).
-  const monday = calMode === "current" ? weekMonday(displayedWeek()) : null;
   for (const d of days) {
     let label = DAY_NAMES[d];
     if (monday) {
@@ -939,7 +949,7 @@ function renderCalendar() {
             ? h("span", { class: "badge", text: "online" })
             : (e.room ? h("span", { class: "badge", text: e.room }) : null),
           e.hybrid ? h("span", { class: "badge hybrid", text: "hybrydowe" }) : null,
-          e.date ? dateBadge(e.date) : cycleBadge(e.cycle),
+          calMode === "current" ? null : (e.date ? dateBadge(e.date) : cycleBadge(e.cycle)),
         ),
         h("div", { class: "meta teacher", text: `${fmtTime(e.start)}–${fmtTime(e.end)} · ${e.teacher || ""}` }),
       );
