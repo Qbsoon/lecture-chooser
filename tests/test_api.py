@@ -9,7 +9,8 @@ import pytest
 from app import create_app
 
 REPO = Path(__file__).resolve().parents[1]
-_SCRAPE_DIR = REPO / "app" / "data" / "scraped" / "6089" / "1"
+FIXTURES = REPO / "tests" / "fixtures"
+_SCRAPE_DIR = FIXTURES / "scraped" / "6089" / "1"
 if not (_SCRAPE_DIR / "plan.html").is_file() or not (_SCRAPE_DIR / "week.html").is_file():
     pytest.skip(
         "brak danych scraped (kid=6089 etap=1) — uruchom "
@@ -19,7 +20,7 @@ if not (_SCRAPE_DIR / "plan.html").is_file() or not (_SCRAPE_DIR / "week.html").
 
 
 def _app():
-    return create_app(str(REPO / "app" / "data"))
+    return create_app(str(FIXTURES))
 
 
 def run(coro):

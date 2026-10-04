@@ -31,7 +31,8 @@ from app.logic.ics import build_ics
 
 REPO = Path(__file__).resolve().parents[1]
 FIX = Path(__file__).resolve().parent / "fixtures"
-DATA = REPO / "app" / "data" / "scraped" / "6089" / "1"
+FIXTURES = REPO / "tests" / "fixtures"
+DATA = FIXTURES / "scraped" / "6089" / "1"
 if not (DATA / "week.html").is_file():
     pytest.skip(
         "brak danych scraped (kid=6089 etap=1) — uruchom "

@@ -17,6 +17,7 @@ from app.scraping.catalog import (
     load_catalog,
     refresh_catalog,
     relocate_course,
+    remove_course,
     save_catalog,
     set_course_refreshed,
     upsert_course,
@@ -31,6 +32,7 @@ from app.scraping.storage import (
     list_kids,
     load_meta,
     load_table,
+    purge_course_dir,
     save_meta,
     save_table,
     scraped_root,
@@ -196,6 +198,55 @@ def test_relocate_course_to_same_wid_is_noop():
     assert entry["last_refreshed"] == "ts"
 
 
+def test_remove_course_deletes_from_all_faculties():
+    """remove_course usuwa wpis kierunku ze wszystkich wydziałów w katalogu."""
+    catalog: dict = {}
+    upsert_faculty(catalog, 5368, "Stary Wydział")
+    upsert_faculty(catalog, 7000, "Nowy Wydział")
+    upsert_course(catalog, 5368, 6089, "Informatyka")
+    # błąd w danych — wpis pod dwoma wydziałami (nie powinno się zdarzyć,
+    # ale remove_course i tak czyści wsystkie)
+    upsert_course(catalog, 7000, 6089, "Informatyka")
+
+    entry = remove_course(catalog, 6089)
+
+    assert entry is not None
+    assert entry["name"] == "Informatyka"
+    assert course_entry(catalog, 5368, 6089) is None
+    assert course_entry(catalog, 7000, 6089) is None
+
+
+def test_remove_course_missing_returns_none():
+    """remove_course dla nieistniejącego kid zwraca None (bez błędu)."""
+    catalog: dict = {}
+    upsert_faculty(catalog, 5368, "WNSiT")
+    upsert_course(catalog, 5368, 6089, "Inf")
+
+    assert remove_course(catalog, 9999) is None
+    assert course_entry(catalog, 5368, 6089) is not None  # nietknięty
+
+
+def test_purge_course_dir_removes_all_etaps(tmp_path: Path):
+    """purge_course_dir usuwa cały katalog {kid}/ ze wszystkimi etapami."""
+    root = scraped_root(tmp_path)
+    # stwórz dane kierunku: dwa etapy + course.json
+    save_table(tmp_path, 6089, 1, "plan", "<html>plan1</html>")
+    save_table(tmp_path, 6089, 1, "week", "<html>week1</html>")
+    save_table(tmp_path, 6089, 3, "plan", "<html>plan3</html>")
+    (root / "6089" / "course.json").write_text("{}", encoding="utf-8")
+
+    assert (root / "6089").exists()
+
+    purge_course_dir(tmp_path, 6089)
+
+    assert not (root / "6089").exists()
+
+
+def test_purge_course_dir_missing_is_noop(tmp_path: Path):
+    """purge_course_dir dla nieistniejącego kid nie wyrzuca błędu."""
+    purge_course_dir(tmp_path, 9999)  # bez błędu
+
+
 # -- catalog: refresh (asyncio.run, jak reszta testów w repo) -----------------
 
 def test_refresh_catalog_builds_and_preserves(tmp_path: Path):
@@ -248,3 +299,35 @@ def test_refresh_catalog_keeps_unknown_faculty_data(tmp_path: Path):
         assert course_entry(catalog, 77, 123)["name"] == "Zlikwidowany kierunek"
 
     asyncio.run(scenario())
+
+
+def test_find_kid_in_ekul_found():
+    """find_kid_in_ekul: kierunek na innym wydziale → (wid, nazwa)."""
+    from app.scraping.catalog import find_kid_in_ekul
+
+    client = FakeClient(
+        faculties=[(5368, "Stary Wydział"), (7000, "Nowy Wydział")],
+        courses={5368: [(6082, "Inny")], 7000: [(6089, "Informatyka II")]},
+    )
+
+    async def scenario():
+        return await find_kid_in_ekul(client, 6089)
+
+    result = asyncio.run(scenario())
+    assert result == (7000, "Nowy Wydział")
+
+
+def test_find_kid_in_ekul_not_found():
+    """find_kid_in_ekul: kierunek zlikwidowany → None."""
+    from app.scraping.catalog import find_kid_in_ekul
+
+    client = FakeClient(
+        faculties=[(5368, "WNSiT")],
+        courses={5368: [(6082, "Inny")]},  # 6089 zniknął
+    )
+
+    async def scenario():
+        return await find_kid_in_ekul(client, 6089)
+
+    result = asyncio.run(scenario())
+    assert result is None

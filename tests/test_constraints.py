@@ -11,7 +11,8 @@ from app.core.source import FileDataLoader
 from app.logic.constraints import evaluate, implicit_zids
 
 REPO = Path(__file__).resolve().parents[1]
-_SCRAPE_DIR = REPO / "app" / "data" / "scraped" / "6089" / "1"
+FIXTURES = REPO / "tests" / "fixtures"
+_SCRAPE_DIR = FIXTURES / "scraped" / "6089" / "1"
 if not (_SCRAPE_DIR / "plan.html").is_file() or not (_SCRAPE_DIR / "week.html").is_file():
     pytest.skip(
         "brak danych scraped (kid=6089 etap=1) — uruchom "
@@ -21,7 +22,7 @@ if not (_SCRAPE_DIR / "plan.html").is_file() or not (_SCRAPE_DIR / "week.html").
 
 
 def _dataset():
-    return build_dataset(FileDataLoader(REPO / "app" / "data"))
+    return build_dataset(FileDataLoader(FIXTURES))
 
 
 def _zids_of(dataset, course_name, kind=None):

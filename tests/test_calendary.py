@@ -13,7 +13,8 @@ from app import create_app
 from app.core.calendary import parse_calendary
 
 REPO = Path(__file__).resolve().parents[1]
-CALENDARY = REPO / "app" / "data" / "calendary.html"
+FIXTURES = REPO / "tests" / "fixtures"
+CALENDARY = FIXTURES / "calendary.html"
 
 
 def _cal():
@@ -55,7 +56,7 @@ def test_semester_starts():
 
 
 def test_api_calendary_json():
-    app = create_app(str(REPO / "app" / "data"))
+    app = create_app(str(FIXTURES))
 
     async def scenario():
         async with app.test_client() as client:

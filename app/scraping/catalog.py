@@ -19,8 +19,11 @@ Struktura ``app/data/scraped/catalog.json``::
   (~15 żądań: 1 na listę wydziałów + 1/wydział) — wchodzi w cykl tygodniowy.
 - ``etaps`` i ``last_refreshed`` uzupełnia scraping/worker kierunku;
   odświeżenie katalogu **nie zeruje** ich (zachowuje stan istniejących wpisów).
-- Katalog jest addytywny: wpisy znikające z e-KUL zostają (dane lokalne
-  pozostają ważne), o najnowszym stanie rozstrzygają ``etaps``/``last_refreshed``.
+- Katalog jest addytywny względem odświeżania spisu (``refresh_catalog``):
+  wpisy znikające z e-KUL zostają. Ale scraping/odświeżanie kierunku, które
+  napotka ``WrongStepError`` i potwierdzi, że kierunek nie istnieje na żadnym
+  wydziale, **usuwa** go z katalogu i z dysku (``remove_course`` +
+  ``purge_course_dir``) — dane martwe nie zalegają.
 """
 from __future__ import annotations
 
@@ -106,6 +109,21 @@ def relocate_course(
     return entry
 
 
+def remove_course(catalog: dict, kid: int) -> dict | None:
+    """Usuwa wpis kierunku z katalogu (ze wszystkich wydziałów); zwraca wpis/``None``.
+
+    Kierunek zniknął z e-KUL (nie istnieje na żadnym wydziale): wpis ``kid``
+    wypada z ``catalog.json``. Dane na dysku (``{kid}/``) czyści osobno
+    ``storage.purge_course_dir`` — tu modyfikujemy tylko katalog.
+    """
+    entry: dict | None = None
+    for _wid, faculty in catalog.items():
+        courses = faculty.get("courses") or {}
+        if str(kid) in courses:
+            entry = courses.pop(str(kid))
+    return entry
+
+
 def set_course_refreshed(
     catalog: dict, wid: int, kid: int, etaps: list[int], timestamp: str
 ) -> dict:
@@ -132,3 +150,18 @@ async def refresh_catalog(client, data_dir: str | Path) -> dict:
         logger.info("katalog: wid=%s %s — %d kierunków", wid, name, len(courses))
     save_catalog(data_dir, catalog)
     return catalog
+
+
+async def find_kid_in_ekul(client, kid: int) -> tuple[int, str] | None:
+    """Szuka kierunku w aktualnym spisie wydziałów e-KUL; ``(wid, nazwa)``/``None``.
+
+    Iteruje wszystkie wydziały i ich kierunki — koszt to ~15 żądań
+    (1 lista wydziałów + 1/wydział). Wywoływane po ``WrongStepError``
+    (cichy reset formularza), by sprawdzić czy kierunek przeniesiono na
+    inny wydział albo całkiem zlikwidowano.
+    """
+    for wid, name in await client.get_faculties():
+        for ckid, _course_name in await client.get_courses(wid):
+            if ckid == kid:
+                return wid, name
+    return None

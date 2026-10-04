@@ -115,6 +115,16 @@ def purge_course(data_dir: str | Path, kid: int, etap: int) -> None:
     if d.is_dir():
         shutil.rmtree(d)
 
+def purge_course_dir(data_dir: str | Path, kid: int) -> None:
+    """Usuwa cały katalog kierunku ``{kid}/`` z dysku (wszystkie etapy + ``course.json``).
+
+    Wywoływane gdy kierunek zniknął z e-KUL (nie istnieje na żadnym wydziale):
+    usuwa ``app/data/scraped/{kid}/`` ze wszystkimi etapami i znacznikiem
+    ukończenia. Operacja nie idzie odwrócić — dane surowe giną.
+    """
+    d = scraped_root(data_dir) / str(kid)
+    if d.is_dir():
+        shutil.rmtree(d)
 
 # -- terminarze przedmiotów (sales/{zid}.html, v3 krok 3 / D2) ----------------
 

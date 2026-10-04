@@ -21,6 +21,12 @@ katalog wydziałów/kierunków (~15 żądań, addytywnie: nie zeruje
 ``settings["scraping"]["bootstrap"]``: pauzy 1–2 s między żądaniami,
 ~1 min przerwy co 50 żądań. Kierunki kompletne na dysku są pomijane bez
 żądań — przerwany bootstrap (Ctrl-C) wznawia się od miejsca stopu.
+Kierunek, który napotka ``WrongStepError`` (cichy reset formularza), jest
+sprawdzany w aktualnym spisie e-KUL: przeniesiony na inny wydział —
+relokowany (w ``catalog.json`` + ponowny zbiór); zlikwidowany (nie ma
+go nigdzie) — usuwany z katalogu i z dysku. Kierunki z błędem scrapowania
+(wrong step po relokacji, inne ``ScrapingError``) są pomijane — bieg
+kontynuowany.
 Kierunki ignorujące ``etap=0`` (cichy reset — podyplomowe) zbierane są
 fallbackiem: plany per semestr, po 1 żądaniu.
 
@@ -43,10 +49,17 @@ from bs4 import BeautifulSoup
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
-from app.scraping.catalog import refresh_catalog  # noqa: E402
+from app.scraping.catalog import (  # noqa: E402
+    find_kid_in_ekul,
+    load_catalog,
+    refresh_catalog,
+    relocate_course,
+    remove_course,
+    save_catalog,
+)
 from app.scraping.client import EkulClient, LoginError, ScrapingError, WrongStepError  # noqa: E402
 from app.scraping.scraper import scrape_course  # noqa: E402
-from app.scraping.storage import catalog_path  # noqa: E402
+from app.scraping.storage import catalog_path, purge_course_dir  # noqa: E402
 
 
 def get_credentials() -> tuple[str, str] | None:
@@ -236,6 +249,11 @@ async def cmd_bootstrap(args: argparse.Namespace) -> int:
     Wznawialny: kierunki z kompletem etapów na dysku są pomijane (0 żądań),
     więc przerwanie (Ctrl-C / błąd sieci) kontynuuje się od miejsca stopu.
     Błąd pojedynczego kierunku nie przerywa całości (kolejni idą dalej).
+
+    Non-addytywny: kierunek z ``WrongStepError`` (cichy reset) jest sprawdzany
+    w e-KUL — przeniesiony na inny wydział → relokacja w ``catalog.json`` +
+    ponowny zbiór; zlikwidowany (brak na każdym wydziale) → usunięcie z
+    katalogu i z dysku. Kierunki martwe nie zalegają.
     """
     creds = get_credentials()
     if creds is None:
@@ -278,21 +296,57 @@ async def cmd_bootstrap(args: argparse.Namespace) -> int:
 
         for i, (wid, kid, name) in enumerate(jobs, start=1):
             label = f"{i}/{len(jobs)} wid={wid} kid={kid} {name or '?'}"
-            try:
-                result = await scrape_course(
-                    client,
-                    wid,
-                    kid,
-                    data_dir,
-                    ra=args.ra,
-                    overwrite=args.overwrite,
-                    progress=say,
-                )
-            except LoginError:
-                raise  # bez sensu ciągnąć dalej
-            except ScrapingError as exc:
-                print(f"[błąd] {label}: {exc} — pomijam, lecę dalej")
-                errors.append((wid, kid, name))
+            current_wid = wid
+            relocated = False
+            result = None
+
+            while True:
+                try:
+                    result = await scrape_course(
+                        client,
+                        current_wid,
+                        kid,
+                        data_dir,
+                        ra=args.ra,
+                        overwrite=args.overwrite,
+                        progress=say,
+                    )
+                    break  # sukces
+                except LoginError:
+                    raise  # bez sensu ciągnąć dalej
+                except WrongStepError:
+                    if relocated:
+                        print(f"[błąd] {label}: relokacja nie pomogła — pomijam, lecę dalej")
+                        errors.append((wid, kid, name))
+                        break
+                    found = await find_kid_in_ekul(client, kid)
+                    if found is None:
+                        # kierunek zlikwidowany — usuwamy z katalogu i z dysku
+                        cat = load_catalog(data_dir)
+                        remove_course(cat, kid)
+                        save_catalog(data_dir, cat)
+                        purge_course_dir(data_dir, kid)
+                        print(f"[usunięto] {label}: kierunek nie istnieje na żadnym wydziale — usunięto z dysku")
+                        break
+                    new_wid, faculty_name = found
+                    if new_wid == current_wid:
+                        print(f"[błąd] {label}: WrongStepError (kid na tym samym wid) — pomijam, lecę dalej")
+                        errors.append((wid, kid, name))
+                        break
+                    # relokacja — przenieś w catalog.json i ponów zbiór
+                    cat = load_catalog(data_dir)
+                    relocate_course(cat, kid, new_wid, name=faculty_name)
+                    save_catalog(data_dir, cat)
+                    print(f"[relokacja] {label}: wid={current_wid} -> wid={new_wid} ({faculty_name})")
+                    current_wid = new_wid
+                    relocated = True
+                    continue
+                except ScrapingError as exc:
+                    print(f"[błąd] {label}: {exc} — pomijam, lecę dalej")
+                    errors.append((wid, kid, name))
+                    break
+
+            if result is None:
                 continue
 
             totals["saved"] += len(result.saved)

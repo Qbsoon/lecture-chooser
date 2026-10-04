@@ -60,7 +60,7 @@ limity i częstotliwości odświeżania (bez dotykania kodu):
 | klucz | domyślnie | opis |
 |---|---|---|
 | `base_url` | `https://e.kul.pl` | bazowy URL portalu e-KUL |
-| `request_delay` | `[2, 6]` | zakres [min, max] sekund pauzy między żądaniami (losowy jitter) |
+| `request_delay` | `[0.1, 0.5]` | zakres [min, max] sekund pauzy między żądaniami (losowy jitter) |
 | `daily_requests` | `100` | globalny limit odświeżeń kierunków dziennie (ręczne odświeżanie) |
 | `per_course_daily` | `10` | limit odświeżeń per kierunek dziennie |
 | `per_course_cooldown_minutes` | `5` | cooldown między odświeżeniami tego samego kierunku (minuty) |

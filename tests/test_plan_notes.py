@@ -22,7 +22,8 @@ REPO = Path(__file__).resolve().parent.parent
 FIX = Path(__file__).resolve().parent / "fixtures"
 OTHER = (FIX / "other_example.html").read_text(encoding="utf-8")
 OTHER2 = (FIX / "other_example_2.html").read_text(encoding="utf-8")
-_SCRAPE_DIR = REPO / "app" / "data" / "scraped" / "6089" / "1"
+FIXTURES = REPO / "tests" / "fixtures"
+_SCRAPE_DIR = FIXTURES / "scraped" / "6089" / "1"
 if not (_SCRAPE_DIR / "plan.html").is_file():
     pytest.skip(
         "brak danych scraped (kid=6089 etap=1) — uruchom "

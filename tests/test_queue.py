@@ -23,7 +23,7 @@ from app.scraping.catalog import (
     upsert_course,
     upsert_faculty,
 )
-from app.scraping.client import WrongStepError
+from app.scraping.client import ScrapingError, WrongStepError
 from app.scraping.queue import RefreshQueue
 from app.scraping.state import Limits, ScrapeState, state_path
 
@@ -367,12 +367,16 @@ def test_ekul_refresher_relocates_moved_course(tmp_path, monkeypatch):
     assert faculty_entry(catalog, 7000)["name"] == "Nowy Wydział"
 
 
-def test_ekul_refresher_reraises_when_kid_nowhere_else(tmp_path, monkeypatch):
-    """WrongStepError bez przenosiny (kid nie ma nigdzie indziej) — błąd
-    wychodzi normalnie, catalog.json zostaje nietknięty."""
+def test_ekul_refresher_removes_when_kid_nowhere_else(tmp_path, monkeypatch):
+    """WrongStepError bez przenosiny (kid nie ma nigdzie indziej) — kierunek
+    jest usuwany z catalog.json i z dysku; błąd wychodzi jako ScrapingError."""
     import app.scraping.queue as queue_mod
 
     _seed_catalog(tmp_path, wid=5368, kid=6089)
+    # plik znacznika ukończenia na dysku — ma zniknąć razem z wpisem
+    (tmp_path / "scraped" / "6089").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "scraped" / "6089" / "course.json").write_text("{}", encoding="utf-8")
+
     client = StubEkulClient(
         faculties=[(5368, "Stary Wydział")],
         courses={5368: [(6082, "Inny kierunek")]},  # 6089 zniknął z e-KUL
@@ -386,8 +390,10 @@ def test_ekul_refresher_reraises_when_kid_nowhere_else(tmp_path, monkeypatch):
     refresher = queue_mod.EkulRefresher("login", "haslo", tmp_path)
     refresher._client = client
 
-    with pytest.raises(WrongStepError):
+    with pytest.raises(ScrapingError):
         asyncio.run(refresher.refresh(6089))
 
     catalog = load_catalog(tmp_path)
-    assert course_entry(catalog, 5368, 6089) is not None  # wpis nietknięty
+    assert course_entry(catalog, 5368, 6089) is None  # wpis usunięty
+    # katalog kierunku na dysku usunięty
+    assert not (tmp_path / "scraped" / "6089").exists()

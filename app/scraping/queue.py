@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from ..core.source import resolve_data_dir
-from .catalog import load_catalog, relocate_course, save_catalog
+from .catalog import find_kid_in_ekul, load_catalog, relocate_course, remove_course, save_catalog
 from .client import (
     DEFAULT_BASE_URL,
     EkulClient,
@@ -39,6 +39,7 @@ from .client import (
 )
 from .scraper import scrape_course
 from .state import Limits, ScrapeState
+from .storage import purge_course_dir
 
 logger = logging.getLogger(__name__)
 
@@ -259,21 +260,22 @@ class EkulRefresher:
                 return int(wid)
         raise ScrapingError(f"kid={kid}: brak w catalog.json")
 
-    async def _find_kid_in_ekul(
-        self, client: EkulClient, kid: int
-    ) -> tuple[int, str] | None:
-        """Szuka kierunku w aktualnym spisie wydziałów e-KUL; ``(wid, nazwa)``/``None``."""
-        for wid, name in await client.get_faculties():
-            for ckid, _course_name in await client.get_courses(wid):
-                if ckid == kid:
-                    return wid, name
-        return None
-
     def _relocate_course(self, kid: int, new_wid: int, faculty_name: str) -> None:
         """Przenosi wpis kierunku w ``catalog.json`` pod nowy wydział."""
         catalog = load_catalog(self.data_dir)
         relocate_course(catalog, kid, new_wid, name=faculty_name)
         save_catalog(self.data_dir, catalog)
+
+    def _remove_course(self, kid: int) -> None:
+        """Usuwa kierunek z ``catalog.json`` i z dysku (``{kid}/``).
+
+        Kierunek zniknął z e-KUL (nie istnieje na żadnym wydziale) —
+        wpis wypada z katalogu, a dane surowe są kasowane z dysku.
+        """
+        catalog = load_catalog(self.data_dir)
+        remove_course(catalog, kid)
+        save_catalog(self.data_dir, catalog)
+        purge_course_dir(self.data_dir, kid)
 
     async def _ensure_client(self) -> EkulClient:
         if self._client is None:
@@ -304,6 +306,10 @@ class EkulRefresher:
         ``catalog.json`` pod nowy wid i ponawiamy zbiór. ``course.json``
         i ``meta.json`` dostają nowy wid z samego ponownego zbioru
         (``overwrite=True`` przepisuje je z bieżącym wid).
+
+        Kierunek zlikwidowany w e-KUL (nie ma go na żadnym wydziale) jest
+        usuwany z ``catalog.json`` i z dysku (``{kid}/``) — dane martwe
+        nie zalegają.
         """
         wid = self._wid_for_kid(kid)
         total = 0
@@ -326,9 +332,17 @@ class EkulRefresher:
                 total += client.request_count - before
                 if relocated:
                     raise
-                found = await self._find_kid_in_ekul(client, kid)
-                if found is None or found[0] == wid:
-                    raise  # kierunek nie przeniesiony — zwykły błąd scrapowania
+                found = await find_kid_in_ekul(client, kid)
+                if found is None:
+                    # kierunek zlikwidowany — usuwamy z katalogu i z dysku
+                    self._remove_course(kid)
+                    logger.info("kid=%d: zlikwidowany — usunięto z katalogu i dysku", kid)
+                    raise ScrapingError(
+                        f"kid={kid}: kierunek nie istnieje na żadnym wydziale "
+                        f"— usunięto z katalogu i dysku"
+                    )
+                if found[0] == wid:
+                    raise  # ten sam wid — zwykły błąd scrapowania
                 new_wid, faculty_name = found
                 relocated = True
                 logger.info(

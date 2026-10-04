@@ -8,7 +8,8 @@ import pytest
 from app.core.parsers import amount_from_note, parse_plan_table, parse_week_table
 
 REPO = Path(__file__).resolve().parents[1]
-DATA = REPO / "app" / "data" / "scraped" / "6089" / "1"
+FIXTURES = REPO / "tests" / "fixtures"
+DATA = FIXTURES / "scraped" / "6089" / "1"
 if not (DATA / "plan.html").is_file() or not (DATA / "week.html").is_file():
     pytest.skip(
         "brak danych scraped (kid=6089 etap=1) — uruchom "

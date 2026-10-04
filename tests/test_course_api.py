@@ -15,15 +15,16 @@ from app import create_app
 from app.logic.selection import COOKIE_NAME, COOKIE_SALT
 
 REPO = Path(__file__).resolve().parents[1]
-DATA = REPO / "app" / "data"
-_COURSE = DATA / "scraped" / "6089" / "1"
+FIXTURES = REPO / "tests" / "fixtures"
+DATA = FIXTURES
+_COURSE = FIXTURES / "scraped" / "6089" / "1"
 if not (_COURSE / "plan.html").is_file() or not (_COURSE / "week.html").is_file():
     pytest.skip(
         "brak danych scraped (kid=6089 etap=1) — uruchom "
         "`python scripts/scrape.py course --wid 5368 --kid 6089 --save`",
         allow_module_level=True,
     )
-if not (DATA / "scraped" / "catalog.json").is_file():
+if not (FIXTURES / "scraped" / "catalog.json").is_file():
     pytest.skip(
         "brak catalog.json — uruchom `python scripts/scrape.py catalog --save`",
         allow_module_level=True,
@@ -43,7 +44,7 @@ def _app(monkeypatch):
     monkeypatch.delenv("EKUL_LOGIN", raising=False)
     monkeypatch.delenv("EKUL_PASSWORD", raising=False)
     monkeypatch.setattr("app._read_dotenv", lambda path: {})
-    return create_app(str(DATA))
+    return create_app(str(FIXTURES))
 
 
 def _other_course(app):
