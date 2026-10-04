@@ -22,8 +22,8 @@ def _cal():
 
 def test_events_parsed():
     cal = _cal()
-    # każdy <li> kalendarium to jedno wydarzenie (34 wpisy na 2026/2027)
-    assert len(cal.events) == 34
+    # każdy <li> kalendarium to jedno wydarzenie (35 wpisów na 2026/2027)
+    assert len(cal.events) == 35
     labels = " | ".join(e.label for e in cal.events)
     assert "Ferie z okazji świąt Bożego Narodzenia" in labels
     assert "Ferie Wielkanocne" in labels

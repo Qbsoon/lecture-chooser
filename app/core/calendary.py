@@ -35,8 +35,10 @@ MONTHS = {
 _MONTH_RE = r"(?:%s)" % "|".join(MONTHS)
 # Token daty z nagłówka kalendarium — dwie formy:
 #   "28-29 września" (zakres dni tego samego miesiąca) albo "30 września".
+# Miesiąc musi być grupą przechwytującą w OBU gałęziach — findall zwraca
+# wtedy zawsze 5 grup (niepasujące = ""), więc można rozpakować na stałe.
 _DATE_TOKEN_RE = re.compile(
-    rf"(?:(\d{{1,2}})\s*-\s*(\d{{1,2}})\s+{_MONTH_RE})|(?:(\d{{1,2}})\s+{_MONTH_RE})"
+    rf"(?:(\d{{1,2}})\s*-\s*(\d{{1,2}})\s+({_MONTH_RE}))|(?:(\d{{1,2}})\s+({_MONTH_RE}))"
 )
 _YEAR_RE = re.compile(r"\b(\d{4})\b")
 
