@@ -128,20 +128,20 @@ def test_put_ignores_unknown_zids():
     run(scenario())
 
 
-def test_calendary_html():
+def test_calendary_json():
+    """/api/calendary zwraca JSON (v3 krok 2): wydarzenia + daty semestrów."""
     app = _app()
 
     async def scenario():
         async with app.test_client() as client:
             res = await client.get("/api/calendary")
             assert res.status_code == 200
-            assert res.content_type.startswith("text/html")
-            body = (await res.get_data()).decode()
-            # treść kalendarium roku akademickiego 2026/2027
-            assert "Kalendarium" in body
-            assert "2026/2027" in body
-            # zwracany fragment (wnętrze .col-md-9), nie pełny dokument <html>
-            assert "<html" not in body
+            assert res.content_type.startswith("application/json")
+            data = await res.get_json()
+            assert data["events"], "brak wydarzeń kalendarium"
+            assert {"from", "to", "label", "free"} <= set(data["events"][0])
+            assert data["semester"]["winter_start"] == "2026-09-30"
+            assert data["semester"]["summer_start"] == "2027-02-24"
 
     run(scenario())
 

@@ -10,6 +10,7 @@ Konwencje tabel (wspólne):
 """
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from datetime import date
@@ -17,7 +18,9 @@ from urllib.parse import parse_qs, urlparse
 
 from bs4 import BeautifulSoup
 
-from .models import Category, Course, Offering, Part, Series, TimetableEntry
+from .models import Category, Course, Offering, Part, Series, TimetableEntry, Meeting
+
+log = logging.getLogger(__name__)
 
 DAY_NAMES = {
     "PONIEDZIAŁEK": 0,
@@ -425,6 +428,66 @@ def parse_week_table(html: str) -> list[TimetableEntry]:
             )
 
     return entries
+
+
+def parse_sale_table(html: str) -> list[Meeting]:
+    """Parsuje terminarz strony przedmiotu (qlsale.html?op=10) -> spotkania.
+
+    Tabela ``datatab`` (kolumny Data / Dzień / Sala / Godz.od-do / Forma
+    zajęć) zawiera konkretne daty wszystkich spotkań — portal pominął
+    w niej już święta i dni wolne. Walidacja spójności: dzień tygodnia
+    wynikający z daty vs kolumna „Dzień” — rozjazd trafia do logu jako
+    warning (spotkanie nie jest odrzucane).
+    """
+    soup = BeautifulSoup(html, "lxml")
+    tables = soup.find_all("table", id=_DATATAB_ID_RE)
+    if not tables:
+        tables = soup.find_all("table", class_="tabelka")
+    if not tables:
+        raise ValueError("Nie znaleziono tabeli terminarza (datatab)")
+
+    day_names_pl = {idx: name for name, idx in DAY_NAMES.items()}
+    meetings: list[Meeting] = []
+    for table in tables:
+        for tr in table.find_all("tr"):
+            if _is_header_row(tr):
+                continue
+            tds = tr.find_all("td")
+            if len(tds) < 4:
+                continue
+            dated = _DATE_RE.match(_text(tds[0]))
+            if dated is None:
+                continue
+            try:
+                meeting_date = date.fromisoformat(dated.group(1))
+            except ValueError:
+                continue  # nieprawidłowa data — wiersz do odrzucenia
+
+            times = _TIME_RE.findall(_text(tds[3]))
+            if len(times) < 2:
+                continue
+
+            room_link = tds[2].find("a")
+            room = (_text(room_link) if room_link else _text(tds[2])) or None
+
+            day_cell = _text(tds[1]).upper()
+            if day_cell in DAY_NAMES and DAY_NAMES[day_cell] != meeting_date.weekday():
+                log.warning(
+                    "Terminarz %s: data to %s, a kolumna „Dzień” mówi „%s”",
+                    dated.group(1),
+                    day_names_pl[meeting_date.weekday()].capitalize(),
+                    _text(tds[1]),
+                )
+
+            meetings.append(
+                Meeting(
+                    date=dated.group(1),
+                    room=room,
+                    start=int(times[0][0]) * 60 + int(times[0][1]),
+                    end=int(times[1][0]) * 60 + int(times[1][1]),
+                )
+            )
+    return meetings
 
 
 def _slug(text: str) -> str:

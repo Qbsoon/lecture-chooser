@@ -137,6 +137,28 @@ class TimetableEntry:
         }
 
 
+@dataclass(frozen=True)
+class Meeting:
+    """Pojedyncze spotkanie z terminarza strony przedmiotu (qlsale op=10, v3).
+
+    Konkretna data spotkania wg portalu — święta i dni wolne są już w niej
+    pominięte, więc jest prawdziwsza niż rozwijanie cykli od ``semester_start``.
+    """
+
+    date: str  # YYYY-MM-DD
+    room: str | None
+    start: int  # minuty od północy
+    end: int
+
+    def to_dict(self) -> dict:
+        return {
+            "date": self.date,
+            "room": self.room,
+            "start": self.start,
+            "end": self.end,
+        }
+
+
 @dataclass
 class Offering:
     """Konkretna pozycja z planu studiów (przedmiot + typ zajęć + ew. grupa).

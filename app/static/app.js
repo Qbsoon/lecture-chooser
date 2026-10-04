@@ -1866,12 +1866,31 @@ async function openCalendary() {
     try {
       const res = await fetch("/api/calendary");
       if (!res.ok) throw new Error(String(res.status));
-      body.innerHTML = await res.text();
+      const data = await res.json();
+      body.replaceChildren(...renderCalendary(data.events || []));
       calendaryLoaded = true;
     } catch (err) {
       body.textContent = "Nie udało się pobrać kalendarium.";
     }
   }
+}
+
+// Kalendarium z /api/calendary (JSON) w ten sam wygląd co dotychczas:
+// akapit z nagłówkiem zakresu dat + lista opisów wydarzeń. Wydarzenia
+// z tym samym nagłówkiem (kilka <li> pod jednym zakresem dat) grupujemy.
+function renderCalendary(events) {
+  const nodes = [];
+  let currentHeading = null;
+  let ul = null;
+  for (const ev of events) {
+    if (ev.heading !== currentHeading) {
+      currentHeading = ev.heading;
+      ul = h("ul");
+      nodes.push(h("p", null, h("strong", { text: ev.heading })), ul);
+    }
+    ul.append(h("li", { text: ev.label }));
+  }
+  return nodes;
 }
 
 function closeCalendary() {
