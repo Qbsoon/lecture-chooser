@@ -1,7 +1,7 @@
 {
     "scraping": {
         "base_url": "https://e.kul.pl",
-        "request_delay": [0.1, 0.5],
+        "request_delay": [0.1, 0.5j],
         "daily_requests": 100,
         "per_course_daily": 10,
         "per_course_cooldown_minutes": 5,

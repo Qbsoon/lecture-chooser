@@ -1014,8 +1014,8 @@ function renderModeSwitch() {
       renderModeSwitch();
     },
   }, h("span", { text: label })));
-  btn("general", "Ogólny", "Tydzień ogólny — widok cykli (sumarycznie / A / B / 1–4)");
-  btn("current", "Obecny", "Tydzień obecny — rzeczywiste daty z terminarzy, od bieżącego tygodnia");
+  btn("general", "Tydzień ogólny", "Widok cykli (sumarycznie / A / B / 1–4)");
+  btn("current", "Tydzień obecny", "Rzeczywiste daty z terminarzy, od bieżącego tygodnia");
 }
 
 /* ---------- przełącznik widoków / nawigacja tygodni ---------- */
