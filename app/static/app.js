@@ -1939,6 +1939,12 @@ function initDownloadMenu() {
       menu.removeAttribute("open");
     }
   });
+  // „Drukuj (1 strona)” ma sens tylko na desktopie — na telefonie (dotyk)
+  // opcję chowamy; window.print() na Firefox Android nie daje 1-stronicowego A4.
+  if (window.matchMedia("(hover: none) and (pointer: coarse)").matches) {
+    const printBtn = menu.querySelector('[data-export="print"]');
+    if (printBtn) printBtn.hidden = true;
+  }
 }
 
 /* ---------- pop-up kalendarium ---------- */
@@ -2066,6 +2072,20 @@ async function loadSelection() {
 
 /* ---------- start ---------- */
 
+// Zapamiętywanie poziomego scrolla kalendarza w sessionStorage — po obrocie
+// telefonu lub powrocie do karty widok wraca na to samo miejsce (tylko UI).
+function initCalScrollMemory() {
+  const sc = document.querySelector(".cal-scroll");
+  if (!sc) return;
+  try {
+    const left = sessionStorage.getItem("calScrollLeft");
+    if (left) sc.scrollLeft = parseInt(left, 10) || 0;
+  } catch (err) {}
+  sc.addEventListener("scroll", () => {
+    try { sessionStorage.setItem("calScrollLeft", String(sc.scrollLeft)); } catch (err) {}
+  }, { passive: true });
+}
+
 async function init() {
   try {
     const res = await fetch("/api/dataset");
@@ -2107,6 +2127,7 @@ async function init() {
   }
 
   initDownloadMenu();
+  initCalScrollMemory(); // poziomy scroll kalendarza przetrwa obrót telefonu
   initCourseBar(); // pasek wydział/kierunek/semestr + „Odśwież” (async — nie blokuje UI)
   // Dopasowanie do 1 strony wydruku: beforeprint liczy wymiary jeszcze ze
   // stylami ekranowymi, matchMedia("print") — już po zastosowaniu arkusza
@@ -2120,10 +2141,16 @@ async function init() {
 
   // po resize inaczej zawija się tekst w kafelkach
   let resizeTimer = null;
-  window.addEventListener("resize", () => {
+  const refitCalHeight = () => {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(fitCalBodyHeight, 100);
-  });
+  };
+  window.addEventListener("resize", refitCalHeight);
+  // mobile (Firefox/Chrome Android): pasek adresu zwija się przy scrollu —
+  // viewport zmienia wysokość bez window-resize; visualViewport to łapie
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", refitCalHeight);
+  }
 
   $("shareBtn").addEventListener("click", sharePlan);
 

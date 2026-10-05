@@ -290,7 +290,8 @@ html, body {
   box-shadow: 0 10px 40px rgb(0 0 0 / 0.3);
   max-width: 720px;
   width: 100%;
-  max-height: 85vh;
+  /* dvh — na mobile pasek adresu zmienia wysokość viewportu */
+  max-height: 85dvh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -492,7 +493,10 @@ html, body {
 
 /* ---------- kalendarz ---------- */
 
-.cal-scroll { overflow-x: auto; }
+.cal-scroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain; /* poziomy scroll kalendarza nie wraca do strony */
+}
 
 .cal-inner { min-width: 860px; }
 
@@ -525,11 +529,20 @@ html, body {
 
 .cal-body {
   position: relative;
-  height: clamp(430px, 68vh, 900px); /* dopasowywana przez JS (fitCalBodyHeight) */
+  /* dvh zamiast vh — na mobile pasek adresu zmienia realną wysokość viewportu */
+  height: clamp(430px, 68dvh, 900px); /* dopasowywana przez JS (fitCalBodyHeight) */
   --hours: 12;
 }
 
-.cal-hours { position: relative; border-right: 1px solid var(--grid-line); }
+.cal-hours {
+  border-right: 1px solid var(--grid-line);
+  /* kolumna godzin przypięta przy poziomym przewijaniu kalendarza
+     (sticky relative do .cal-scroll — kontenera przewijania) */
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  background: var(--card);
+}
 
 .cal-hours span {
   position: absolute;
@@ -669,7 +682,15 @@ html, body {
 
 /* ---------- picker ---------- */
 
-.picker { max-height: calc(100vh - 96px); overflow-y: auto; position: sticky; top: 76px; }
+.picker {
+  /* dvh: wysokość licznikowana z faktycznym viewportem — pasek adresu
+     Firefox/Chrome Android zwija się przy scrollu i vh przycinałoby listę */
+  max-height: calc(100dvh - 96px);
+  overflow-y: auto;
+  position: sticky;
+  top: 76px;
+  overscroll-behavior: contain; /* scroll listy nie przerzuca na stronę */
+}
 
 .p-note { font-size: 0.78rem; color: var(--muted); margin: -6px 0 10px; }
 
@@ -882,19 +903,99 @@ details.coll-box > summary .dot { width: 10px; height: 10px; border-radius: 50%;
 
 /* ---------- responsywność ---------- */
 
+/* dotyk: wyłączamy podwójne tapnięcie (zoom) na elementach sterujących */
+.btn, .theme-select, .cbar-select, .modal-close,
+.week-switch button, .dropdown-menu button, .cat-head .btn,
+.offering, .cal-block, details.coll-box > summary, .switch-row {
+  touch-action: manipulation;
+}
+
 @media (max-width: 1080px) {
-  .layout { grid-template-columns: 1fr; }
-  .picker { position: static; max-height: none; }
+  /* minmax(0, 1fr) — inaczej min-width:auto kafelka nie pozwala zwęzić
+     kolumny poniżej min-width kalendarza i CAŁA strona robi poziomy scroll */
+  .layout { grid-template-columns: minmax(0, 1fr); }
+  /* picker przewija się RAZEM ze stroną: overflow-y: visible — gdyby został
+     kontenerem scrolla (auto z reguły bazowej), to mimo braku przepełnienia
+     pochłaniałby gest dotykowy (overscroll-behavior: contain) i strona
+     nie scrollowała się z wnętrza listy przedmiotów */
+  .picker { position: static; max-height: none; overflow-y: visible; }
 }
 
 @media (max-width: 640px) {
-  .topbar { padding: 10px 12px; }
-  .topbar-title { width: 100%; }
+  .topbar { padding: 8px 10px; gap: 8px; padding-top: calc(8px + env(safe-area-inset-top, 0px)); }
+  .topbar-title { width: 100%; gap: 6px; }
+  .subtitle { display: none; } /* na wąskim ekranie zbędny balast */
+  .topbar-actions { gap: 8px; }
+  .topbar-actions .btn { padding: 8px 10px; font-size: 0.85rem; }
+
+  /* pasek statusu: własna linia pod akcjami, nie rozpycha topbara */
+  .status-chip { width: 100%; text-align: center; white-space: normal; }
+
+  /* motyw: zwężony, żeby topbar mieścił mniej więcej w 2 linie */
+  .theme-select { padding: 8px 6px; max-width: 118px; font-size: 0.85rem; }
+
   .layout { padding: 12px 10px 24px; }
-  .cal-inner { min-width: 720px; }
-  .cal-block { font-size: 0.68rem; }
-  .cal-block b { font-size: 0.72rem; }
+
+  /* wydział/kierunek/semestr: siatka 2-kolumnowa, selecty pełnej szerokości;
+     font-size 16px zapobiega auto-zoomowi przy fokusie pola (Firefox/Chrome) */
+  .coursebar { display: grid; grid-template-columns: 1fr 1fr; align-items: start; }
+  .cbar-select { max-width: none; width: 100%; font-size: 16px; }
+  .coursebar .btn { grid-column: 1 / -1; justify-self: start; padding: 9px 14px; }
+  .refresh-info { grid-column: 1 / -1; white-space: normal; }
+
+  .cal-inner { min-width: 640px; }
+  .cal-block { font-size: 0.68rem; padding: 3px 5px; }
+  .cal-block b {
+    font-size: 0.72rem;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .cal-block .meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cal-block .meta .teacher { display: none; }
+
+  /* lista przedmiotów: wygodne celowanie palcem (min. ~44px) */
+  .offering { padding: 9px 12px 10px 24px; font-size: 0.84rem; }
+  .offering input[type="radio"], .offering input[type="checkbox"] { width: 18px; height: 18px; }
+  .course-head { padding: 10px 12px; }
+  .cat-head .btn, .cat-head h3 { padding: 4px 0; }
+  .cat-head .btn { padding: 8px 12px; font-size: 0.8rem; }
+  details.coll-box > summary { padding: 12px; }
+
+  /* pop-up kalendarium: pełny ekran (bottom-sheet-like), łatwe zamknięcie × */
+  .modal-overlay { padding: 0; }
+  .modal-card {
+    max-width: none;
+    width: 100%;
+    height: 100dvh;
+    max-height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+  .modal-body { padding: 14px 14px 28px; }
+
+  .toast {
+    max-width: calc(100vw - 24px);
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/* ---------- dotyk: stany hover nie mają sensu na ekranach dotykowych ---------- */
+
+/* Na dotyku :hover „przykleja się” po pierwszym tapnięciu — stany aktywne
+   przenosimy na :active, a efekty hover neutralizujemy. */
+@media (hover: none) {
+  .btn:hover { border-color: var(--border); background: var(--bg); }
+  .btn-ghost:hover { border-color: var(--border); background: var(--bg); color: var(--text); }
+  .btn:active { border-color: var(--accent); background: var(--accent-soft); }
+  .btn-ghost:active { border-color: var(--danger); background: var(--danger-soft); color: var(--danger); }
+  .cal-block:hover { filter: none; z-index: auto; }
+  .cal-block:active { filter: brightness(1.08); z-index: 3; }
+  .dropdown-menu button:hover { background: transparent; }
+  .dropdown-menu button:active { background: var(--bg); }
 }
 
 /* ---------- menu „Pobierz” ---------- */
@@ -943,6 +1044,21 @@ details.dropdown[open] > summary { border-color: var(--accent); background: var(
 
 .dropdown-menu button:hover { background: var(--bg); }
 
+/* mobile: bottom-sheet przyklejony do dołu — menu nie wypada poza ekran.
+   Reguły MUSĄ być po sekcji bazowej .dropdown-menu powyżej (ta sama
+   specyficzność — wygrywa kolejność w arkuszu). */
+@media (max-width: 640px) {
+  .dropdown-menu {
+    position: fixed;
+    left: 10px;
+    right: 10px;
+    top: auto;
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    min-width: 0;
+    z-index: 60;
+  }
+}
+
 /* ---------- druk / PDF ---------- */
 
 /* style drukowanego nagłówka — wspólne dla wydruku i eksportu PNG/PDF
@@ -982,6 +1098,7 @@ details.dropdown[open] > summary { border-color: var(--accent); background: var(
   .cal-scroll { overflow: visible; }
   .cal-inner { min-width: 0; }
   .cal-head { position: static; }
+  .cal-hours { position: static; } /* sticky godzin — tylko dla ekranu */
 
   .cal-day, .cal-block, .cal-block b {
     print-color-adjust: exact;

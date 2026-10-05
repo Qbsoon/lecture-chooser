@@ -2,7 +2,11 @@
 <html lang="pl">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- viewport-fit=cover: rysowanie do krawędzi + env(safe-area-inset-*) w CSS -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <!-- pasek systemowy (Android) w kolorze motywu jasnego/ciemnego -->
+  <meta name="theme-color" content="#eef2f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0b1220" media="(prefers-color-scheme: dark)">
   <title>Plan zajęć — wybór przedmiotów</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>

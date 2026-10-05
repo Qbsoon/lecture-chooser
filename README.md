@@ -12,6 +12,28 @@ oraz kalendarium akademickie (dni wolne, daty semestru).
 - backend: **Quart** + BeautifulSoup (parsowanie tabel S4A) + itsdangerous (podpisane ciasteczko wyboru)
 - frontend: vanilla JS + CSS (bez frameworków), responsywny, jasny/ciemny motyw
 
+## Obsługa telefonu (mobile)
+
+Frontend jest przystosowany do ekranów dotykowych (testowany na Firefox Android):
+
+- **Topbar**: zwija się do 2 linii — tytuł, przyciski akcji, a pod nimi pasek statusu na pełną szerokość.
+- **Kalendarz**: poziomy scroll z **przypiętą kolumną godzin** (`position: sticky`), nazwa dnia z datą
+  w trybie „Tydzień obecny”, kafelki z zawijaną/ucinaną treścią. Poziomy scroll kalendarza
+  nie przerzuca przewijania na stronę (`overscroll-behavior-x: contain`), a pozycja scrolla
+  jest zapamiętywana w `sessionStorage` — po obrocie telefonu widok wraca na to samo miejsce.
+- **Picker**: pod kalendarzem; elementy listy mają powiększone pola dotyku (~44 px), a pasek statusu
+  planu (sticky w topbarze) jest widoczny także podczas scrollowania listy.
+- **Pop-up kalendarium**: na wąskich ekranach pełnoekranowy; menu „Pobierz” otwiera się jako
+  bottom-sheet przyklejony do dołu ekranu (nie wypada poza viewport).
+- **Dotyk**: opcja „Drukuj (1 strona)” jest ukryta na urządzeniach dotykowych (druk A4 ma sens
+  tylko na desktopie); przyciski reagują stanem `:active` zamiast „przyklejonego” `:hover`;
+  `touch-action: manipulation` eliminuje opóźnienie/zoom podwójnego tapnięcia.
+- **Wysokości** liczone w `dvh` (a nie `vh`) i odświeżane z `visualViewport` — zwijanie paska
+  adresu w Firefox/Chrome Android nie przycina treści.
+- **„Udostępnij”**: na telefonie otwiera systemowe okno udostępniania; gdy przeglądarka je
+  ogranicza (np. bez https) — link spada do schowka z potwierdzeniem toastem.
+- Pasek systemowy Android ma kolor motywu (`theme-color` dla schematu jasnego i ciemnego).
+
 ## Uruchomienie lokalne
 
 ```bash
