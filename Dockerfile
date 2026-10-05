@@ -6,7 +6,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
  && playwright install --with-deps chromium \
  && apt-get update \
- && apt-get install -y --no-install-recommends fonts-liberation \
+ && apt-get install -y --no-install-recommends fonts-liberation vim-tiny nano \
  && rm -rf /var/lib/apt/lists/*
 
 COPY . .

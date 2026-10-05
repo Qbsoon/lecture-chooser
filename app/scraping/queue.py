@@ -84,6 +84,7 @@ class RefreshQueue:
         scheduled_batch_size: int = 50,
         scheduled_batch_pause: float = 60.0,
         scheduled_set_delay: Callable[[bool], None] | None = None,
+        task_retries: int = 2,
     ) -> None:
         self.state = state
         self._refresh = refresh
@@ -92,12 +93,14 @@ class RefreshQueue:
         self._scheduled_batch_size = scheduled_batch_size
         self._scheduled_batch_pause = scheduled_batch_pause
         self._scheduled_set_delay = scheduled_set_delay
+        self.task_retries = task_retries  # ponowne wejścia do kolejki po błędzie
         self._scheduled_requests = 0
         self._next_scheduled_pause = scheduled_batch_size
         self._now: NowFn = now or (lambda: datetime.now(timezone.utc))
         self._sleep: SleepFn = sleep
         self.on_refreshed = on_refreshed  # np. invalidacja cache datasetów
         self._running: set[int] = set()  # kierunki właśnie odświeżane
+        self._failures: dict[int, int] = {}  # kid -> liczba nieudanych prób
 
     # -- bramka dla API (krok 8) ----------------------------------------
 
@@ -187,6 +190,7 @@ class RefreshQueue:
                     self.on_refreshed(kid)
                 except Exception:  # callback nie może wywrócić workera
                     logger.exception("on_refreshed(kid=%d) rzucił wyjątek", kid)
+            self._failures.pop(kid, None)
             if was_scheduled and self._scheduled_batch_pause > 0:
                 self._scheduled_requests += used
                 while (
@@ -202,7 +206,25 @@ class RefreshQueue:
             logger.info("kid=%d odświeżony (%d żądań)", kid, used)
             return "done"
         except Exception as exc:  # izolacja błędu pojedynczego zadania
-            logger.warning("kid=%d: odświeżenie nieudane: %s", kid, exc)
+            self._failures[kid] = self._failures.get(kid, 0) + 1
+            if self._failures[kid] <= self.task_retries:
+                # ponów — wraca na koniec kolejki, bez sztucznych backoffów
+                # (naturalna pauza: przerobienie pozostałych zadań)
+                self.state.enqueue(kid, scheduled=was_scheduled)
+                logger.warning(
+                    "kid=%d: odświeżenie nieudane (próba %d/%d) — ponawiam: %s",
+                    kid,
+                    self._failures[kid],
+                    self.task_retries + 1,
+                    exc,
+                )
+            else:
+                logger.warning(
+                    "kid=%d: odświeżenie nieudane po %d próbach: %s",
+                    kid,
+                    self._failures[kid],
+                    exc,
+                )
             return "done_error"
         finally:
             if was_scheduled and self._scheduled_set_delay is not None:
@@ -235,6 +257,7 @@ class EkulRefresher:
         base_url: str = DEFAULT_BASE_URL,
         request_delay: tuple[float, float] = (2.0, 6.0),
         scheduled_request_delay: tuple[float, float] | None = None,
+        retries: int = 3,
     ) -> None:
         self._username = username
         self._password = password
@@ -243,6 +266,7 @@ class EkulRefresher:
         self._regular_delay = request_delay
         self._scheduled_delay = scheduled_request_delay or request_delay
         self._request_delay = request_delay
+        self._retries = retries
         self._client: EkulClient | None = None
 
     def set_scheduled_delay(self, scheduled: bool) -> None:
@@ -284,6 +308,7 @@ class EkulRefresher:
                 self._password,
                 base_url=self._base_url,
                 request_delay=self._request_delay,
+                retries=self._retries,
             )
             await client.__aenter__()
             await client.login()
@@ -388,6 +413,8 @@ def build_refresh_service(
     delay = scraping.get("request_delay", (2, 6))
     boot = scraping.get("bootstrap", {})
     boot_delay = tuple(boot.get("request_delay", (1, 2)))
+    request_retries = int(scraping.get("request_retries", 3))
+    task_retries = int(scraping.get("task_retries", 2))
     refresher = EkulRefresher(
         username,
         password,
@@ -395,6 +422,7 @@ def build_refresh_service(
         base_url=str(scraping.get("base_url", DEFAULT_BASE_URL)),
         request_delay=(float(delay[0]), float(delay[1])),
         scheduled_request_delay=(float(boot_delay[0]), float(boot_delay[1])),
+        retries=request_retries,
     )
     state = ScrapeState.load(directory)
     queue = RefreshQueue(
@@ -405,5 +433,6 @@ def build_refresh_service(
         scheduled_batch_size=int(boot.get("batch_size", 50)),
         scheduled_batch_pause=float(boot.get("batch_pause", 60)),
         scheduled_set_delay=refresher.set_scheduled_delay,
+        task_retries=task_retries,
     )
     return queue, refresher

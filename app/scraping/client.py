@@ -22,13 +22,17 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
 import random
 import re
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 import httpx
 from bs4 import BeautifulSoup
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL = "https://e.kul.pl"
 DEFAULT_USER_AGENT = (
@@ -213,6 +217,7 @@ class EkulClient:
         request_delay: tuple[float, float] = (1.0, 2.0),
         timeout: float = 30.0,
         user_agent: str = DEFAULT_USER_AGENT,
+        retries: int = 3,
     ) -> None:
         self._username = username
         self._password = password
@@ -220,6 +225,7 @@ class EkulClient:
         self._request_delay = request_delay
         self._timeout = timeout
         self._user_agent = user_agent
+        self._retries = retries  # dodatkowe próby przy błędach transportu
         self._http: httpx.AsyncClient | None = None
         self.request_count = 0
 
@@ -253,21 +259,43 @@ class EkulClient:
         lo, hi = self._request_delay
         await asyncio.sleep(random.uniform(lo, hi))
 
+    async def _with_retries(self, send: Callable[[], Awaitable[httpx.Response]]) -> str:
+        """Wykonaj żądanie; przy błędzie transportu ponów do ``retries`` razy.
+
+        ``httpx.TransportError`` obejmuje zerwane połączenia
+        (``RemoteProtocolError`` — „Server disconnected…”), timeouty i błędy
+        TCP. Pauza między próbami to zwykły losowy ``request_delay`` —
+        żadnych wykładniczych backoffów. Po wyczerpaniu prób błąd wylatuje.
+        """
+        for attempt in range(self._retries + 1):
+            await self._pause()
+            self.request_count += 1
+            try:
+                resp = await send()
+                resp.raise_for_status()
+                return resp.text
+            except httpx.TransportError as exc:
+                if attempt >= self._retries:
+                    raise
+                logger.warning(
+                    "błąd transportu (próba %d/%d): %s",
+                    attempt + 1,
+                    self._retries,
+                    exc,
+                )
+        raise AssertionError("nieosiągalne")  # dla mypy/pyright
+
     async def _raw_get(self, path: str, params: dict | None = None) -> str:
         assert self._http is not None, "użyj 'async with EkulClient(...)'"
-        await self._pause()
-        self.request_count += 1
-        resp = await self._http.get(path, params=params)
-        resp.raise_for_status()
-        return resp.text
+        return await self._with_retries(
+            lambda: self._http.get(path, params=params)
+        )
 
     async def _raw_post(self, path: str, data: dict) -> str:
         assert self._http is not None, "użyj 'async with EkulClient(...)'"
-        await self._pause()
-        self.request_count += 1
-        resp = await self._http.post(path, data=data)
-        resp.raise_for_status()
-        return resp.text
+        return await self._with_retries(
+            lambda: self._http.post(path, data=data)
+        )
 
     async def login(self) -> None:
         """Logowanie (GET formularza -> POST z post_kod) lub potwierdzenie sesji.
