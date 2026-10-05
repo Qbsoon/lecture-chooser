@@ -35,9 +35,28 @@ def _read_dotenv(path: Path) -> dict[str, str]:
     return out
 
 
+def _asset_version(static_dir: Path) -> str:
+    """Wersja zasobów statycznych do cache-bustingu: maks. mtime plików.
+
+    URL zasobu dostaje ``?v=<mtime>`` — każda zmiana pliku (deploy,
+    build Dockera, edycja) zmienia URL, więc przeglądarka pobiera świeżą
+    wersję zamiast korzystać ze starej z cache (Firefox Android potrafi
+    trzymać CSS nawet po twardym odświeżeniu strony).
+    """
+    try:
+        newest = max(p.stat().st_mtime for p in static_dir.iterdir() if p.is_file())
+        return str(int(newest * 1000))  # ms — unikamy kolizji w obrębie sekundy
+    except (OSError, ValueError):
+        return "1"
+
+
 def create_app(data_dir: str | None = None) -> Quart:
     app = Quart(__name__)
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-only-insecure-secret")
+    # wersjonowane zasoby (?v=) mogą być cache'owane ostro — podmiana pliku
+    # zmienia URL, więc długi max-age nie grozi przestarzałą wersją
+    app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 86400  # 1 doba
+    app.jinja_env.globals["asset_v"] = _asset_version(Path(app.root_path) / "static")
 
     # krok 8: cache datasetów per (kid, etap) — leniwe budowanie z
     # app/data/scraped/ (ScrapedDataLoader), invalidacja po udanym

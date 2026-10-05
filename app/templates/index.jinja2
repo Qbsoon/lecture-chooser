@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#eef2f7" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0b1220" media="(prefers-color-scheme: dark)">
   <title>Plan zajęć — wybór przedmiotów</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ asset_v }}">
 </head>
 <body>
   <header class="topbar">
@@ -100,6 +100,6 @@
     <span>Hostowane bez współpracy z KUL przez studenta na prywatnym serwerze. Kontakt: contact@qbsoon.pl</span>
   </footer>
 
-  <script src="{{ url_for('static', filename='app.js') }}"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v={{ asset_v }}"></script>
 </body>
 </html>
