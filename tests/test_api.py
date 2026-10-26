@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import pytest
@@ -40,6 +41,56 @@ def test_get_dataset():
             assert data["series"]
 
     run(scenario())
+
+
+def test_dataset_includes_matching_exams(monkeypatch):
+    """exams.json: wpisy zajęć z datasetu trafiają do /api/dataset, obce nie."""
+    app = _app()
+    exams = [
+        {"zid": 765361, "name": "Egzamin", "date": "2027-01-20"},
+        {"zid": 999999, "name": "Obcy przedmiot", "date": "2027-01-21"},
+    ]
+    monkeypatch.setattr("app.main._load_exams", lambda path=None: exams)
+
+    async def scenario():
+        async with app.test_client() as client:
+            res = await client.get("/api/dataset")
+            assert res.status_code == 200
+            data = await res.get_json()
+            assert data["exams"] == [
+                {"zid": 765361, "name": "Egzamin", "date": "2027-01-20"}
+            ]
+
+    run(scenario())
+
+
+def test_load_exams_skips_invalid_entries(tmp_path):
+    from app.main import _load_exams
+
+    path = tmp_path / "exams.json"
+    path.write_text(
+        json.dumps([
+            {"zid": 765361, "name": "Egzamin", "date": "2027-01-20"},
+            {"zid": "abc", "name": "X", "date": "2027-01-20"},  # zid nie-int
+            {"zid": 1, "name": "", "date": "2027-01-20"},       # pusta nazwa
+            {"zid": 2, "name": "X", "date": "20-01-2027"},      # zła data
+            {"zid": 3, "name": "X"},                             # brak daty
+            "nie-obiekt",
+        ]),
+        encoding="utf-8",
+    )
+    assert _load_exams(path) == [
+        {"zid": 765361, "name": "Egzamin", "date": "2027-01-20"}
+    ]
+
+
+def test_load_exams_tolerates_missing_and_broken_file(tmp_path):
+    from app.main import _load_exams
+
+    assert _load_exams(tmp_path / "brak.json") == []
+    broken = tmp_path / "exams.json"
+    broken.write_text("{nie poprawny json", encoding="utf-8")
+    assert _load_exams(broken) == []
 
 
 def test_index_page():

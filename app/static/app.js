@@ -48,6 +48,7 @@ let hoverZid = null;          // offering pod kursorem: podświetlenie, gdy wybr
 let hoverZids = new Set();    // zidy do podglądu w kalendarzu (przygaszone kafelki, tylko UI)
 let openBoxes = new Set();    // rozwinięte sekcje listy (id boxa) — przetrwają re-render listy
 let courseIndex = new Map(); // zid -> {offering, course, category}
+let examByZid = new Map();   // zid -> [{name, date}] — egzaminy z exams.json
 let catColor = new Map();    // category.id -> kolor
 let semesterStart = "2026-10-05"; // poniedziałek 1. tygodnia (daty w linkach Google Calendar)
 let semesterWeeks = 15;           // liczba tygodni semestru
@@ -210,6 +211,12 @@ function indexData() {
         }
       }
     }
+  }
+  // Egzaminy z exams.json (plik ręczny, API dokleja je do datasetu).
+  examByZid = new Map();
+  for (const ex of dataset.exams || []) {
+    if (!examByZid.has(ex.zid)) examByZid.set(ex.zid, []);
+    examByZid.get(ex.zid).push({ name: ex.name, date: ex.date });
   }
 }
 
@@ -867,7 +874,13 @@ function renderCalendar() {
   }
   const hours = (maxH - minH) / 60;
 
-  inner.style.setProperty("--cal-cols", `44px repeat(${days.length}, 1fr)`);
+  // Kolumny: dni z zajęciami — pełna szerokość, dni tylko z wydarzeniami
+  // kalendarium (badge dni wolnych/uroczystości) — pół pasu.
+  const lectureDays = new Set(entries.map((x) => x.e.day));
+  inner.style.setProperty(
+    "--cal-cols",
+    `44px ${days.map((d) => (lectureDays.has(d) ? "1fr" : "0.5fr")).join(" ")}`,
+  );
   body.style.setProperty("--hours", hours);
 
   head.append(h("div", { class: "cal-corner" }));
@@ -908,8 +921,6 @@ function renderCalendar() {
     laneCount.set(d, Math.max(1, lanes.length));
   }
 
-  const maxLanes = Math.max(1, ...[...laneCount.values()]);
-
   for (const d of days) {
     const dayEl = h("div", { class: "cal-day" });
     // Nakładka dni wolnych/uroczystości (tylko tryb "obecny", v3 krok 6).
@@ -926,13 +937,20 @@ function renderCalendar() {
         }, h("span", { text: evs.map((e) => e.label).join(", ") })));
       }
     }
+    const dayLanes = laneCount.get(d) || 1; // tylko dni z kolizją mają >1 pas
     for (const { x, lane } of columns.get(d)) {
       const { e, course, offering, category } = x;
       const color = catColor.get(category.id);
       const top = ((e.start - minH) / (maxH - minH)) * 100;
       const height = Math.max(2.2, ((e.end - e.start) / (maxH - minH)) * 100);
-      const left = (lane / maxLanes) * 100;
-      const width = (1 / maxLanes) * 100;
+      const left = (lane / dayLanes) * 100;
+      const width = (1 / dayLanes) * 100;
+      // Egzamin z exams.json — tylko gdy kafelek wypada DOKŁADNIE w dniu
+      // egzaminu (kafelki trybu "obecny" mają konkretną datę z terminarza).
+      // Bez egzaminu tego dnia — nic nie renderujemy.
+      const exam = calMode === "current" && e.date
+        ? (examByZid.get(offering.zid) || []).find((x2) => x2.date === e.date)
+        : null;
       const block = h("div", {
         class: "cal-block" + (x.preview ? " preview" : "") + (hoverZid === offering.zid ? " hover" : "") + (bad.has(offering.zid) ? " collide" : ""),
         style: `top:${top}%;height:${height}%;left:${left}%;width:${width}%;` +
@@ -952,6 +970,8 @@ function renderCalendar() {
           calMode === "current" ? null : (e.date ? dateBadge(e.date) : cycleBadge(e.cycle)),
         ),
         h("div", { class: "meta teacher", text: `${fmtTime(e.start)}–${fmtTime(e.end)} · ${e.teacher || ""}` }),
+        // data zbędna — kafelek już stoi w kolumnie dnia egzaminu
+        exam ? h("div", { class: "exam-bar", text: exam.name }) : null,
       );
       dayEl.append(block);
     }
@@ -1555,15 +1575,19 @@ function drawCalendarCanvas() {
       col.push({ x, lane });
     }
   }
-  const maxLanes = Math.max(1, ...days.map((d) => new Set(columns.get(d).map((c) => c.lane)).size));
+  // rozdział na pasy — jak w renderCalendar, ale per dzień
+  const laneCount = new Map(
+    days.map((d) => [d, Math.max(1, new Set(columns.get(d).map((c) => c.lane)).size)])
+  );
 
   // kafelki zajęć
   for (const d of days) {
+    const dayLanes = laneCount.get(d);
     for (const { x, lane } of columns.get(d)) {
       const { e, course, offering, category } = x;
       const color = catColor.get(category.id);
-      const bx = dayX.get(d) + (lane / maxLanes) * DAY_W + 3;
-      const bw = DAY_W / maxLanes - 6;
+      const bx = dayX.get(d) + (lane / dayLanes) * DAY_W + 3;
+      const bw = DAY_W / dayLanes - 6;
       const by = yAt(e.start) + 2;
       const bh = Math.max(16, yAt(e.end) - yAt(e.start) - 4);
 

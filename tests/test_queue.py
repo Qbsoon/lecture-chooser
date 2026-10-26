@@ -225,7 +225,12 @@ def test_run_once_isolates_job_errors(tmp_path):
     result = asyncio.run(queue.run_once())
     assert result == "done_error"
     assert calls == [5]
-    assert queue.state.queue == []  # błędne zadanie nie blokuje FIFO
+    assert queue.state.queue == [5]  # błąd → zadanie na KONIEC kolejki (nie blokuje FIFO)
+    # task_retries=2 → łącznie 3 próby, potem zadanie wypada z kolejki
+    assert asyncio.run(queue.run_once()) == "done_error"
+    assert asyncio.run(queue.run_once()) == "done_error"
+    assert queue.state.queue == []
+    assert calls == [5, 5, 5]
     # błąd nie liczy się jako odświeżenie: wpis w ogóle nie powstaje
     assert "5" not in queue.state.courses
 

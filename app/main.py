@@ -1,6 +1,9 @@
 """Trasy aplikacji: strona główna + API."""
 from __future__ import annotations
 
+import json
+import logging
+from datetime import date
 from pathlib import Path
 
 from quart import Blueprint, Response, current_app, jsonify, render_template, request
@@ -18,7 +21,51 @@ from .logic.selection import (
 )
 from .scraping.catalog import load_catalog
 
+logger = logging.getLogger(__name__)
+
 bp = Blueprint("main", __name__)
+
+
+def _load_exams(path: Path | None = None) -> list[dict]:
+    """Wpisy terminów egzaminów z app/data/exams.json (wzorowane na calendary).
+
+    Trzy pola: ``zid`` (int, zajęcia), ``name`` (nazwa egzaminu), ``date``
+    (ISO YYYY-MM-DD). Plik edytowany ręcznie — błędne wpisy pomijane
+    z ostrzeżeniem, nigdy fatalnie.
+    """
+    if path is None:
+        path = Path(__file__).resolve().parent / "data" / "exams.json"
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    if not isinstance(raw, list):
+        logger.warning("exams.json: brak listy wpisów — pomijam")
+        return []
+    exams = []
+    for i, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            logger.warning("exams.json: wpis %d nie jest obiektem — pomijam", i)
+            continue
+        zid, name, day = entry.get("zid"), entry.get("name"), entry.get("date")
+        if not isinstance(zid, int):
+            logger.warning("exams.json: wpis %d bez 'zid' (int) — pomijam", i)
+            continue
+        if not isinstance(name, str) or not name:
+            logger.warning("exams.json: wpis %d (zid=%s) bez nazwy — pomijam", i, zid)
+            continue
+        if not isinstance(day, str):
+            logger.warning("exams.json: wpis %d (zid=%s) bez daty — pomijam", i, zid)
+            continue
+        try:
+            date.fromisoformat(day)
+        except ValueError:
+            logger.warning(
+                "exams.json: wpis %d (zid=%s) ze złą datą %r — pomijam", i, zid, day
+            )
+            continue
+        exams.append({"zid": zid, "name": name, "date": day})
+    return exams
 
 
 @bp.route("/")
@@ -42,6 +89,8 @@ async def api_dataset() -> dict:
         return jsonify({"error": "Brak danych kierunków (app/data/scraped/)"}), 404
     ds = cache.get(*course)
     payload = ds.to_dict()
+    zids = set(ds.offerings)
+    payload["exams"] = [e for e in _load_exams() if e["zid"] in zids]
     payload["course"] = {"kid": course[0], "etap": course[1]}
     response = jsonify(payload)
     if "kid" in request.args and "etap" in request.args:

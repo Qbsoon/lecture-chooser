@@ -46,7 +46,7 @@
         "etaps": [
           5
         ],
-        "last_refreshed": "2026-10-04T15:59:25+00:00",
+        "last_refreshed": "2026-10-26T22:02:29+00:00",
         "name": "Nauki o rodzinie (stacjonarne I stopnia)"
       },
       "4461": {
@@ -147,7 +147,7 @@
         "etaps": [
           1
         ],
-        "last_refreshed": "2026-10-04T16:31:11+00:00",
+        "last_refreshed": "2026-10-26T22:06:16+00:00",
         "name": "Międzyobszarowe Indywidualne Studia Humanistyczno-Społeczne (stacjonarne II stopnia)"
       }
     },
@@ -244,14 +244,14 @@
           1,
           3
         ],
-        "last_refreshed": "2026-10-04T16:48:03+00:00",
+        "last_refreshed": "2026-10-26T21:55:49+00:00",
         "name": "Położnictwo (stacjonarne II stopnia)"
       },
       "6332": {
         "etaps": [
           1
         ],
-        "last_refreshed": "2026-10-04T16:48:46+00:00",
+        "last_refreshed": "2026-10-26T22:06:30+00:00",
         "name": "Biotechnologia medyczna (stacjonarne II stopnia)"
       },
       "6335": {
@@ -265,7 +265,7 @@
         "etaps": [
           1
         ],
-        "last_refreshed": "2026-10-04T16:50:05+00:00",
+        "last_refreshed": "2026-10-26T22:08:12+00:00",
         "name": "Medycyna stylu życia (stacjonarne I stopnia)"
       }
     },
@@ -326,12 +326,12 @@
           3,
           5
         ],
-        "last_refreshed": "2026-10-04T16:54:55+00:00",
+        "last_refreshed": "2026-10-26T22:04:28+00:00",
         "name": "Sztuczna Inteligencja (stacjonarne I stopnia)"
       },
       "5940": {
         "etaps": [],
-        "last_refreshed": "2026-10-04T16:56:20+00:00",
+        "last_refreshed": "2026-10-26T22:04:26+00:00",
         "name": "Przywództwo i Retoryka (stacjonarne I stopnia)"
       },
       "6085": {
@@ -422,7 +422,7 @@
           1,
           3
         ],
-        "last_refreshed": "2026-10-04T17:10:48+00:00",
+        "last_refreshed": "2026-10-26T22:02:54+00:00",
         "name": "Humanistyka cyfrowa (stacjonarne II stopnia)"
       },
       "352": {
@@ -491,7 +491,7 @@
           3,
           5
         ],
-        "last_refreshed": "2026-10-04T17:04:36+00:00",
+        "last_refreshed": "2026-10-26T22:03:18+00:00",
         "name": "Filologia Klasyczna (stacjonarne I stopnia)"
       },
       "498": {
@@ -509,7 +509,7 @@
           3,
           5
         ],
-        "last_refreshed": "2026-10-04T17:07:22+00:00",
+        "last_refreshed": "2026-10-26T22:09:21+00:00",
         "name": "Filologia Angielska (niestacjonarne I stopnia)"
       },
       "5323": {
@@ -566,7 +566,7 @@
           1,
           3
         ],
-        "last_refreshed": "2026-10-04T17:18:32+00:00",
+        "last_refreshed": "2026-10-26T22:09:56+00:00",
         "name": "Italianistyka (stacjonarne II stopnia)"
       },
       "6328": {
@@ -776,7 +776,7 @@
       },
       "6330": {
         "etaps": [],
-        "last_refreshed": "2026-10-04T17:42:48+00:00",
+        "last_refreshed": "2026-10-26T22:02:50+00:00",
         "name": "Polityka-Gospodarka-Transformacja cyfrowa (stacjonarne I stopnia)"
       }
     },
@@ -854,7 +854,7 @@
         "etaps": [
           1
         ],
-        "last_refreshed": "2026-10-04T17:50:03+00:00",
+        "last_refreshed": "2026-10-26T22:06:19+00:00",
         "name": "Socjologia (stacjonarne II stopnia)"
       },
       "6081": {
@@ -926,12 +926,12 @@
           1,
           3
         ],
-        "last_refreshed": "2026-10-04T16:26:11+00:00",
+        "last_refreshed": "2026-10-26T22:07:39+00:00",
         "name": "Prawo w biznesie (stacjonarne II stopnia)"
       },
       "3362": {
         "etaps": [],
-        "last_refreshed": null,
+        "last_refreshed": "2026-10-26T22:07:37+00:00",
         "name": "Studia podyplomowe w zakresie podatków i prawa podatkowego"
       },
       "348": {
@@ -978,7 +978,7 @@
           7,
           9
         ],
-        "last_refreshed": "2026-10-04T16:24:10+00:00",
+        "last_refreshed": "2026-10-26T22:06:41+00:00",
         "name": "Prawo (niestacjonarne jednolite magisterskie)"
       },
       "5663": {

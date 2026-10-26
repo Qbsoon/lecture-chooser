@@ -611,6 +611,25 @@ html, body {
 
 .cal-block.collide { outline: 2px solid var(--danger); outline-offset: -2px; }
 
+/* pasek egzaminu wewnątrz kafelka zajęć (tryb "obecny", exams.json):
+   widoczny tylko na kafelku wypadającym dokładnie w dniu egzaminu */
+.exam-bar {
+  display: block;
+  box-sizing: border-box;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 3px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  background: var(--danger-soft);
+  font-size: 0.64rem;
+  font-weight: 700;
+}
+
 /* podgląd offeringu pod kursorem — przygaszona wersja zwykłego kafelka */
 .cal-block.preview {
   opacity: 0.55;
@@ -675,9 +694,7 @@ html, body {
 .cal-day-badge span {
   display: inline-block;
   max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 /* ---------- picker ---------- */
@@ -943,7 +960,7 @@ details.coll-box > summary .dot { width: 10px; height: 10px; border-radius: 50%;
   .coursebar .btn { grid-column: 1 / -1; justify-self: start; padding: 9px 14px; }
   .refresh-info { grid-column: 1 / -1; white-space: normal; }
 
-  .cal-inner { min-width: 640px; }
+  .cal-inner { min-width: 860px; } /* węższy kalendarz zwęża pasy — pasek egzaminu się nie mieści */
   .cal-block { font-size: 0.68rem; padding: 3px 5px; }
   .cal-block b {
     font-size: 0.72rem;

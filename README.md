@@ -127,6 +127,20 @@ wyżej), a po jego wykonaniu strona sama przeładowuje nowy dataset.
 Domyślnie startuje informatyka II st., semestr 1 (kid=6089, etap=1).
 Ustawienia (`settings.json`) leżą w katalogu `app/data/`.
 
+## Terminy egzaminów (`app/data/exams.json`)
+
+Plik edytowany ręcznie: lista wpisów z trzema polami — `zid` (identyfikator
+zajęć, jak w planie), `name` (nazwa egzaminu) i `date` (data `YYYY-MM-DD`):
+
+```json
+[
+  {"zid": 530, "name": "Egzamin", "date": "2027-01-20"}
+]
+```
+
+Egzamin zajęć wybranych w planie wyświetla się jako pasek w dniu egzaminu
+w trybie „Tydzień obecny".
+
 ## Ograniczenia wyboru (notki w tabeli planu)
 
 Jedynym źródłem ograniczeń są notki w wierszach pod nagłówkami sekcji w tabeli
