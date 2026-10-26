@@ -14,7 +14,8 @@ wspólny helper z ``storage.py``)::
       },
       "queue": [27, 6089],           # FIFO zadań odświeżenia (per kierunek)
       "last_weekly": "2026-09-05",   # data ostatniego cyklu tygodniowego (krok 10)
-      "scheduled": [27]              # kierunki z cyklu tygodniowego (krok 10)
+      "scheduled": [27],             # kierunki z cyklu tygodniowego (krok 10)
+      "last_daily": "2026-09-05"     # data ostatniego cyklu ulubionych (codziennie 4:00)
     }
 
 Liczniki dobowe resetują się przy zmianie dnia (``_roll_day`` wołane
@@ -76,6 +77,7 @@ class ScrapeState:
         queue: list[int] | None = None,
         last_weekly: str = "",
         scheduled: set[int] | None = None,
+        last_daily: str = "",
     ) -> None:
         self.data_dir = Path(data_dir)
         self.day = day
@@ -84,6 +86,7 @@ class ScrapeState:
         self.queue: list[int] = queue or []
         self.last_weekly = last_weekly
         self.scheduled: set[int] = scheduled or set()
+        self.last_daily = last_daily
 
     # -- trwałość ------------------------------------------------------
 
@@ -107,6 +110,7 @@ class ScrapeState:
             queue=[int(kid) for kid in raw.get("queue") or []],
             last_weekly=str(raw.get("last_weekly", "")),
             scheduled={int(kid) for kid in (raw.get("scheduled") or [])},
+            last_daily=str(raw.get("last_daily", "")),
         )
 
     def save(self) -> None:
@@ -120,6 +124,7 @@ class ScrapeState:
                 "queue": self.queue,
                 "last_weekly": self.last_weekly,
                 "scheduled": sorted(self.scheduled),
+                "last_daily": self.last_daily,
             },
         )
 

@@ -1,15 +1,17 @@
-"""Scheduler tygodniowy (krok 10 planu).
+"""Scheduler cykli odświeżania (krok 10 planu + codzienny cykl ulubionych).
 
 Raz w tygodniu (``settings["scraping"]["weekly_refresh"]`` — domyślnie
 sobota 4:00) wszystkie kierunki z katalogu trafiają do kolejki w kolejności
-losowej. Worker rozkłada je w ramach limitów dobowych; zadania, na które
-zabrakło limitu, zostają w kolejce i przechodzą na kolejny dzień — aż cały
-przegląd się domknie.
+losowej. Dodatkowo codziennie o ``settings["scraping"]["favourite_refresh_hour"]``
+(domyślnie 4:00) do kolejki trafiają ulubione kierunki (``FAVOURITE_KIDS``).
+Worker rozkłada zadania w ramach limitów dobowych; zadania, na które
+zabrakło limitu, zostają w kolejce i przechodzą na kolejny dzień.
 
 Scheduler jest idempotentny: ``state.last_weekly`` zapamiętuje datę
-ostatniego uruchomienia (data dnia wyzwalacza, nie data wykonania), więc
-wielokrotne wywołanie w tym samym tygodniu nie dubluje zadań (``enqueue``
-i tak deduplikuje). Gdy aplikacja była wyłączona w zaplanowanym terminie,
+ostatniego uruchomienia tygodniowego (data dnia wyzwalacza, nie data
+wykonania), a ``state.last_daily`` — codziennego; wielokrotne wywołanie
+tego samego dnia/tygodnia nie dubluje zadań (``enqueue`` i tak
+deduplikuje). Gdy aplikacja była wyłączona w zaplanowanym terminie,
 scheduler nadrabia przy najbliższym uruchomieniu — o ile bieżący czas
 wypada w oknie po dniu/godzinie wyzwalacza.
 """
@@ -59,6 +61,26 @@ def _weekly_settings(data_dir: Path) -> tuple[int, int]:
         return DEFAULT_WEEKDAY, DEFAULT_HOUR
 
 
+def _daily_trigger_date(now: datetime, hour: int) -> date:
+    """Data ostatniego wyzwalacza dziennego (godzina ``hour``).
+
+    Analogia ``_trigger_date`` bez cyklu tygodniowego: dziś po godzinie
+    wyzwalacza → dziś; dziś przed godziną → wczoraj (okno zamknięte).
+    """
+    if now.hour < hour:
+        return (now - timedelta(days=1)).date()
+    return now.date()
+
+
+def _favourite_settings(data_dir: Path) -> int:
+    """Godzina codziennego odświeżania ulubionych z ``settings.json``; domyślnie 4."""
+    try:
+        raw = json.loads((data_dir / "settings.json").read_text(encoding="utf-8"))
+        return int(raw.get("scraping", {}).get("favourite_refresh_hour", DEFAULT_HOUR))
+    except (OSError, json.JSONDecodeError, ValueError, TypeError):
+        return DEFAULT_HOUR
+
+
 class WeeklyScheduler:
     """Cykl tygodniowy: raz w tygodniu wsadza wszystkie kierunki do kolejki.
 
@@ -75,6 +97,7 @@ class WeeklyScheduler:
         now=None,
         rng: random.Random | None = None,
         sleep=None,
+        favourites: list[int] | None = None,
     ) -> None:
         self.queue = queue
         self.data_dir = Path(data_dir)
@@ -82,6 +105,11 @@ class WeeklyScheduler:
         self._rng = rng or random.Random()
         self._sleep = sleep or asyncio.sleep
         self._weekday, self._hour = _weekly_settings(self.data_dir)
+        # ulubione kierunki (FAVOURITE_KIDS) — odświeżane codziennie o godzinie
+        # ``favourite_refresh_hour``; dzieci używane jako-is (kid ID, bez
+        # rozwiązywania nazw), pusta lista = brak cyklu dziennego
+        self.favourites = [int(kid) for kid in (favourites or [])]
+        self._favourite_hour = _favourite_settings(self.data_dir)
 
     def maybe_schedule(self) -> bool:
         """Wsadza wszystkie kierunki do kolejki, jeśli pora; ``False`` jeśli nie.
@@ -120,11 +148,41 @@ class WeeklyScheduler:
         )
         return True
 
+    def maybe_schedule_favourites(self) -> bool:
+        """Codziennie o ``favourite_refresh_hour`` wsadza ulubione do kolejki.
+
+        Idempotentny: ``state.last_daily`` blokuje powtórne uruchomienie
+        tego samego dnia. Ulubione wchodzą z ``scheduled=True`` (luźne
+        limity, jak cykl tygodniowy); ``enqueue`` deduplikuje, więc kolizja
+        z cyklem tygodniowym (sobota 4:00) nie dubluje zadań. Bez listy
+        ulubionych — brak działania.
+        """
+        if not self.favourites:
+            return False
+        now = self._now()
+        if now.hour < self._favourite_hour:
+            return False
+        trigger = _daily_trigger_date(now, self._favourite_hour)
+        if self.queue.state.last_daily == trigger.isoformat():
+            return False
+
+        for kid in self.favourites:
+            self.queue.state.enqueue(kid, scheduled=True)
+        self.queue.state.last_daily = trigger.isoformat()
+        self.queue.state.save()
+        logger.info(
+            "cykl ulubionych: zaplanowano %d kierunków (trigger=%s)",
+            len(self.favourites),
+            trigger.isoformat(),
+        )
+        return True
+
     async def run_forever(self, *, interval_seconds: float = _SCHEDULE_INTERVAL) -> None:
         """Pętla schedulera — uruchamiana w ``create_app`` obok workera."""
         while True:
             try:
                 self.maybe_schedule()
+                self.maybe_schedule_favourites()
             except Exception:  # scheduler nie może wywrócić aplikacji
-                logger.exception("scheduler tygodniowy: błąd")
+                logger.exception("scheduler: błąd")
             await self._sleep(interval_seconds)

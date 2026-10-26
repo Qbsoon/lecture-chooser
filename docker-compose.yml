@@ -8,6 +8,10 @@ services:
       - "8000:8000"
     environment:
       SECRET_KEY: please-change-me
+      # ulubione kierunki (kid ID, oddzielone przecinkami) — codziennie o 4:00
+      # (favourite_refresh_hour w settings) trafiają do kolejki odświeżania;
+      # działa tylko razem z EKUL_LOGIN/EKUL_PASSWORD
+      FAVOURITE_KIDS: "6089"  # Informatyka II stopnia
       # Odkomentuj i ustaw, aby włączyć usługę odświeżania:
       # EKUL_LOGIN: twoj.login@kul.lublin.pl
       # EKUL_PASSWORD: twoje-haslo

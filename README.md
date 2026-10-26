@@ -66,6 +66,7 @@ ze zmiennych środowiskowych (te mają pierwszeństwo). Dostępne zmienne:
 | `SECRET_KEY` | nie | sekret do podpisywania ciasteczka wyboru (domyślnie `dev-only-insecure-secret` — **zmień w produkcji**) |
 | `EKUL_LOGIN` | nie | login e-KUL; włącza usługę odświeżania (bez niej worker nie startuje) |
 | `EKUL_PASSWORD` | nie | hasło e-KUL (paruje z `EKUL_LOGIN`) |
+| `FAVOURITE_KIDS` | nie | ulubione kierunki (kid ID, oddzielone przecinkami) — odświeżane codziennie o 4:00 (`favourite_refresh_hour`); działa tylko razem z `EKUL_LOGIN`/`EKUL_PASSWORD` |
 
 Przykładowy `.env`:
 ```
@@ -89,6 +90,7 @@ limity i częstotliwości odświeżania (bez dotykania kodu):
 | `per_course_daily` | `10` | limit odświeżeń per kierunek dziennie |
 | `per_course_cooldown_minutes` | `5` | cooldown między odświeżeniami tego samego kierunku (minuty) |
 | `weekly_refresh` | `{"weekday":"sat","hour":4}` | dzień i godzina cyklu tygodniowego |
+| `favourite_refresh_hour` | `4` | godzina codziennego cyklu ulubionych (`FAVOURITE_KIDS`) |
 | `login_counts_towards_limit` | `true` | czy logowanie e-KUL liczy się do limitu dobowego |
 | `bootstrap.request_delay` | `[0.1, 0.5]` | tempo bootstrapu i cyklu tygodniowego (krótsze pauzy) |
 | `bootstrap.batch_size` | `50` | przerwa co N żądań dla bootstrapu i cyklu tygodniowego |
@@ -105,6 +107,12 @@ Cykl tygodniowy (scheduler) używa tempa z sekcji `bootstrap` — krótsze pauzy
 i przerwa co 50 żądań, ale **bez** limitów dobowych/per-kierunek/cooldown
 (jak bootstrap, nie jak odświeżanie na żądanie).
 
+Cykl tygodniowy i cykl ulubionych prowadzi ten sam scheduler (idempotentny —
+`state.json` pamięta `last_weekly`/`last_daily`, więc restart w dniu
+wyzwalacza nie dubluje zadań; wyłączenie aplikacji w zaplanowanym terminie
+nadrabia przy najbliższym uruchomieniu). W sobotę 4:00 oba cykle wypadają
+jednocześnie — wspólne zadania trafiają do kolejki raz (deduplikacja).
+
 ### Usługa odświeżania (worker)
 
 Aplikacja może sama odświeżać dane e-KUL w tle — kolejka FIFO per
@@ -117,6 +125,14 @@ uruchomienie aplikacji z danymi logowania jest bezpieczne. Stan
 kolejki) trwa w `app/data/scraped/state.json` (zapis atomowy;
 reset liczników przy zmianie dnia). Zadania, na które zabrakło
 limitu, zostają w kolejce na kolejny dzień.
+
+Poza cyklem tygodniowym (wszystkie kierunki) scheduler codziennie o
+`favourite_refresh_hour` (domyślnie 4:00) odświeża **ulubione kierunki** —
+listę `FAVOURITE_KIDS` (kid ID, przecinkami; domyślnie w compose:
+`"6089"` — Informatyka II stopnia). Działa tylko razem z
+`EKUL_LOGIN`/`EKUL_PASSWORD`. Zadania ulubionych idą z flagą planową
+(tak jak w cyklu tygodniowym) — ręczne limity (dobowy, per kierunek,
+cooldown) ich nie dotyczą.
 
 Wybór kierunku odbywa się w UI — pasek pod nagłówkiem (wydział → kierunek →
 semestr) pobiera `/api/dataset?kid=&etap=` i zapamiętuje kierunek w ciasteczku
@@ -234,6 +250,9 @@ można też zbudować własnoręcznie (`docker build -t lecture-chooser .`). Wol
 `./app/data/scraped` zapewnia trwałość danych między restartami. Healthcheck
 odpytuje `/api/health` co 30 s. Zmienne `EKUL_LOGIN`/`EKUL_PASSWORD` odkomentuj
 w sekcji `environment` `docker-compose.yml`, aby włączyć usługę odświeżania.
+Listę ulubionych kierunków (`FAVOURITE_KIDS` — codzienne odświeżanie o 4:00)
+zmieniasz w tej samej sekcji; domyślnie ustawiony jest kid `6089`
+(Informatyka II stopnia).
 
 Dockerfile instaluje Playwright + Chromium (serwerowy PDF) oraz `fonts-liberation`
 (polskie znaki w system-ui). Bez tego `/api/selection.pdf` zwraca 503,

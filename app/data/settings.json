@@ -6,6 +6,7 @@
         "per_course_daily": 10,
         "per_course_cooldown_minutes": 5,
         "weekly_refresh": {"weekday": "sat", "hour": 4},
+        "favourite_refresh_hour": 4,
         "login_counts_towards_limit": true,
         "bootstrap": {
             "request_delay": [0.1, 0.5],

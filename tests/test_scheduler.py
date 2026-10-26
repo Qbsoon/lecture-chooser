@@ -76,10 +76,17 @@ def _make_queue(data_dir: Path, clock: FakeClock, *, limits: Limits | None = Non
 
 
 def _make_scheduler(
-    data_dir: Path, clock: FakeClock, *, seed: int = 42, limits: Limits | None = None
+    data_dir: Path,
+    clock: FakeClock,
+    *,
+    seed: int = 42,
+    limits: Limits | None = None,
+    favourites: list[int] | None = None,
 ) -> tuple[WeeklyScheduler, RefreshQueue]:
     queue = _make_queue(data_dir, clock, limits=limits)
-    scheduler = WeeklyScheduler(queue, data_dir, now=clock, rng=random.Random(seed))
+    scheduler = WeeklyScheduler(
+        queue, data_dir, now=clock, rng=random.Random(seed), favourites=favourites
+    )
     return scheduler, queue
 
 
@@ -317,6 +324,157 @@ def test_scheduled_batch_pause(tmp_path):
     assert 60.0 in sleep_calls
     asyncio.run(queue.run_once())  # 3 żądania (total 9) — 9 < 12, brak pauzy
     assert sleep_calls.count(60.0) == 1
+
+
+# -- cykl ulubionych (FAVOURITE_KIDS) ------------------------------------------
+
+
+def test_favourites_before_hour_no_schedule(tmp_path):
+    _make_settings(tmp_path)
+    clock = FakeClock(datetime(2026, 9, 5, 3, 0, 0))  # 3:00 — za wcześnie
+    scheduler, queue = _make_scheduler(tmp_path, clock, favourites=[6089])
+
+    assert scheduler.maybe_schedule_favourites() is False
+    assert queue.state.queue == []
+    assert queue.state.last_daily == ""
+
+
+def test_favourites_enqueues_at_hour(tmp_path):
+    _make_settings(tmp_path)
+    clock = FakeClock(SAT_4)
+    scheduler, queue = _make_scheduler(tmp_path, clock, favourites=[6089, 155])
+
+    assert scheduler.maybe_schedule_favourites() is True
+    assert set(queue.state.queue) == {6089, 155}
+    assert queue.state.scheduled == {6089, 155}  # zadania planowe
+    assert queue.state.last_daily == "2026-09-05"
+
+
+def test_favourites_idempotent_same_day(tmp_path):
+    _make_settings(tmp_path)
+    clock = FakeClock(SAT_4)
+    scheduler, queue = _make_scheduler(tmp_path, clock, favourites=[6089])
+
+    scheduler.maybe_schedule_favourites()
+    clock.advance(hours=2)  # 6:00 — ten sam dzień
+    assert scheduler.maybe_schedule_favourites() is False
+    assert queue.state.queue.count(6089) == 1
+
+
+def test_favourites_next_day(tmp_path):
+    _make_settings(tmp_path)
+    clock = FakeClock(SAT_4)
+    scheduler, queue = _make_scheduler(tmp_path, clock, favourites=[6089])
+
+    scheduler.maybe_schedule_favourites()
+    queue.state.queue.clear()  # worker zdążył przetworzyć
+    queue.state.scheduled.clear()
+    clock.advance(days=1)  # niedziela 4:00
+    assert scheduler.maybe_schedule_favourites() is True
+    assert queue.state.queue == [6089]
+    assert queue.state.last_daily == "2026-09-06"
+
+
+def test_favourites_catch_up_after_downtime(tmp_path):
+    """App startuje o 10:00 (po 4:00) — nadrabia z triggerem = dziś."""
+    _make_settings(tmp_path)
+    clock = FakeClock(datetime(2026, 9, 6, 10, 0, 0))
+    scheduler, queue = _make_scheduler(tmp_path, clock, favourites=[6089])
+
+    assert scheduler.maybe_schedule_favourites() is True
+    assert queue.state.last_daily == "2026-09-06"
+
+
+def test_favourites_saturday_overlap_no_duplicates(tmp_path):
+    """Sobota 4:00 — cykl tygodniowy i ulubione razem; enqueue deduplikuje."""
+    _make_settings(tmp_path)
+    _make_catalog(tmp_path, {5368: [6089, 100]})
+    clock = FakeClock(SAT_4)
+    scheduler, queue = _make_scheduler(tmp_path, clock, favourites=[6089])
+
+    scheduler.maybe_schedule()
+    scheduler.maybe_schedule_favourites()
+    assert queue.state.queue.count(6089) == 1
+    assert set(queue.state.queue) == {6089, 100}
+
+
+def test_favourites_empty_list_no_op(tmp_path):
+    _make_settings(tmp_path)
+    clock = FakeClock(SAT_4)
+    scheduler, queue = _make_scheduler(tmp_path, clock)  # brak favourites
+
+    assert scheduler.maybe_schedule_favourites() is False
+    assert queue.state.queue == []
+    assert queue.state.last_daily == ""
+
+
+def test_favourites_custom_hour(tmp_path):
+    _make_settings(tmp_path)
+    (Path(tmp_path) / "settings.json").write_text(
+        json.dumps(
+            {"scraping": {"weekly_refresh": {"weekday": "sat", "hour": 4},
+                          "favourite_refresh_hour": 6}},
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    clock = FakeClock(datetime(2026, 9, 5, 5, 0, 0))  # 5:00 — przed 6:00
+    scheduler, queue = _make_scheduler(tmp_path, clock, favourites=[6089])
+
+    assert scheduler.maybe_schedule_favourites() is False
+    clock.advance(hours=1)  # 6:00
+    assert scheduler.maybe_schedule_favourites() is True
+    assert queue.state.last_daily == "2026-09-05"
+
+
+def test_favourites_tasks_bypass_daily_limit(tmp_path):
+    """Zadania ulubionych omijają limit dobowy — jak cykl tygodniowy."""
+    _make_settings(tmp_path)
+    clock = FakeClock(SAT_4)
+    scheduler, queue = _make_scheduler(
+        tmp_path, clock, favourites=[6089], limits=Limits(daily_requests=0)
+    )
+
+    scheduler.maybe_schedule_favourites()
+    assert asyncio.run(queue.run_once()) == "done"
+    assert queue.state.queue == []
+    assert queue.state.requests_today == 0  # nie liczy do limitu
+
+
+# -- stan: last_daily ----------------------------------------------------------
+
+
+def test_last_daily_round_trip(tmp_path):
+    state = ScrapeState(tmp_path)
+    state.last_daily = "2026-09-05"
+    state.save()
+    loaded = ScrapeState.load(tmp_path)
+    assert loaded.last_daily == "2026-09-05"
+
+
+def test_last_daily_backward_compatible(tmp_path):
+    """Stary state.json bez last_daily ładuje się z pustą wartością."""
+    root = Path(tmp_path) / "scraped"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "state.json").write_text(json.dumps({"queue": [1]}), encoding="utf-8")
+
+    state = ScrapeState.load(tmp_path)
+    assert state.last_daily == ""
+    assert state.queue == [1]
+
+
+# -- parsowanie FAVOURITE_KIDS -------------------------------------------------
+
+
+def test_parse_favourite_kids():
+    from app import _parse_favourite_kids
+
+    assert _parse_favourite_kids("6089") == [6089]
+    assert _parse_favourite_kids("6089, 155") == [6089, 155]
+    assert _parse_favourite_kids(" 6089 ,abc,155 ") == [6089, 155]  # zły wpis pominięty
+    assert _parse_favourite_kids(None) == []
+    assert _parse_favourite_kids("") == []
 
 
 def test_scheduled_delay_switch(tmp_path):

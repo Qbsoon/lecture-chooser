@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from contextlib import suppress
 from pathlib import Path
@@ -13,6 +14,8 @@ from .logic.pdf import close_pdf_renderer
 from .main import bp
 from .scraping.queue import build_refresh_service
 from .scraping.scheduler import WeeklyScheduler
+
+logger = logging.getLogger(__name__)
 
 
 def _read_dotenv(path: Path) -> dict[str, str]:
@@ -48,6 +51,25 @@ def _asset_version(static_dir: Path) -> str:
         return str(int(newest * 1000))  # ms — unikamy kolizji w obrębie sekundy
     except (OSError, ValueError):
         return "1"
+
+
+def _parse_favourite_kids(raw: str | None) -> list[int]:
+    """Kid ID z ``FAVOURITE_KIDS`` (oddzielone przecinkami) — ulubione kierunki.
+
+    Wartości używane jako-is (liczby); nieprawidłowe wpisy (nie-liczby,
+    puste) pomijane z ostrzeżeniem — błędna konfiguracja nigdy nie wywraca
+    aplikacji. ``None``/pusta wartość → pusta lista (brak cyklu dziennego).
+    """
+    kids: list[int] = []
+    for chunk in (raw or "").split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        try:
+            kids.append(int(chunk))
+        except ValueError:
+            logger.warning("FAVOURITE_KIDS: pomijam zły wpis %r", chunk)
+    return kids
 
 
 def create_app(data_dir: str | None = None) -> Quart:
@@ -87,7 +109,14 @@ def create_app(data_dir: str | None = None) -> Quart:
         # 4:00 z settings) wsadza wszystkie kierunki do kolejki w losowej
         # kolejności; worker rozkłada je w ramach limitów dobowych, a
         # zadania bez limitu zostają na kolejny dzień, aż cykl się domknie.
-        scheduler = WeeklyScheduler(refresh_queue, refresh_queue.state.data_dir)
+        # Ten sam scheduler prowadzi też cykl dzienny ulubionych: codziennie
+        # o ``favourite_refresh_hour`` (domyślnie 4:00) wsadza kierunki z
+        # FAVOURITE_KIDS (kid ID) — idempotentny przez state.last_daily.
+        scheduler = WeeklyScheduler(
+            refresh_queue,
+            refresh_queue.state.data_dir,
+            favourites=_parse_favourite_kids(env.get("FAVOURITE_KIDS")),
+        )
         app.scheduler_task: asyncio.Task | None = None
 
         @app.before_serving
