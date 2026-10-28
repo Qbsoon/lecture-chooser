@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import date
 from pathlib import Path
 
@@ -68,6 +69,118 @@ def _load_exams(path: Path | None = None) -> list[dict]:
     return exams
 
 
+_TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
+
+
+def _load_events(path: Path | None = None) -> list[dict]:
+    """Wydarzenia/dni/godziny wolne z app/data/events.json (wzorowane na exams).
+
+    Pola wpisu: ``name`` (str), ``date`` (ISO), opcjonalnie ``until`` (ISO,
+    włącznie — zakres dni), ``from``/``to`` (``HH:MM`` — okno godzinowe,
+    ``to`` domyślnie koniec dnia) oraz ``free`` (bool, domyślnie true —
+    zajęcia odpadają w oknie; false = tylko informacja). Zwracane wpisy mają
+    czasy w minutach od północy (``start``/``end``, 1440 = koniec dnia) oraz
+    ``allday``, gdy wpisu nie ogranicza żadna godzina. Plik edytowany
+    ręcznie — błędne wpisy pomijane z ostrzeżeniem, nigdy fatalnie.
+    """
+    if path is None:
+        path = Path(__file__).resolve().parent / "data" / "events.json"
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    if not isinstance(raw, list):
+        logger.warning("events.json: brak listy wpisów — pomijam")
+        return []
+    events = []
+    for i, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            logger.warning("events.json: wpis %d nie jest obiektem — pomijam", i)
+            continue
+        name, day = entry.get("name"), entry.get("date")
+        free = entry.get("free", True)
+        if not isinstance(name, str) or not name:
+            logger.warning("events.json: wpis %d bez nazwy — pomijam", i)
+            continue
+        if not isinstance(day, str):
+            logger.warning("events.json: wpis %d („%s”) bez daty — pomijam", i, name)
+            continue
+        try:
+            first = date.fromisoformat(day)
+        except ValueError:
+            logger.warning(
+                "events.json: wpis %d („%s”) ze złą datą %r — pomijam", i, name, day
+            )
+            continue
+        last = first
+        until_raw = entry.get("until")
+        if until_raw is not None:
+            if not isinstance(until_raw, str):
+                logger.warning(
+                    "events.json: wpis %d („%s”) ze złym 'until' %r — pomijam",
+                    i, name, until_raw,
+                )
+                continue
+            try:
+                last = date.fromisoformat(until_raw)
+            except ValueError:
+                logger.warning(
+                    "events.json: wpis %d („%s”) ze złym 'until' %r — pomijam",
+                    i, name, until_raw,
+                )
+                continue
+            if last < first:
+                logger.warning(
+                    "events.json: wpis %d („%s”): 'until' %s wcześniejsze niż "
+                    "'date' %s — pomijam", i, name, until_raw, day,
+                )
+                continue
+        if not isinstance(free, bool):
+            logger.warning(
+                "events.json: wpis %d („%s”): 'free' nie jest bool — pomijam",
+                i, name,
+            )
+            continue
+        start_raw, end_raw = entry.get("from"), entry.get("to")
+        start = end = None
+        if start_raw is not None or end_raw is not None:
+            m_from = (
+                _TIME_RE.match(start_raw.strip())
+                if isinstance(start_raw, str) else None
+            )
+            m_to = (
+                _TIME_RE.match(end_raw.strip())
+                if isinstance(end_raw, str) else None
+            )
+            if (start_raw is not None and m_from is None) or (
+                end_raw is not None and m_to is None
+            ):
+                logger.warning(
+                    "events.json: wpis %d („%s”) ze złą godziną (%r/%r) — pomijam",
+                    i, name, start_raw, end_raw,
+                )
+                continue
+            start = 0 if m_from is None else int(m_from[1]) * 60 + int(m_from[2])
+            end = 1440 if m_to is None else int(m_to[1]) * 60 + int(m_to[2])
+            if end <= start:
+                logger.warning(
+                    "events.json: wpis %d („%s”): 'to' %r nie późniejsze niż "
+                    "'from' %r — pomijam", i, name, end_raw, start_raw,
+                )
+                continue
+        allday = start is None
+        events.append({
+            "name": name,
+            "date": day,
+            "until": last.isoformat(),
+            "free": free,
+            "allday": allday,
+            "start": 0 if allday else start,
+            "end": 1440 if allday else end,
+        })
+    return events
+
+
 @bp.route("/")
 async def index() -> str:
     return await render_template("index.jinja2")
@@ -91,6 +204,8 @@ async def api_dataset() -> dict:
     payload = ds.to_dict()
     zids = set(ds.offerings)
     payload["exams"] = [e for e in _load_exams() if e["zid"] in zids]
+    # Custom events / days / free hours (events.json) — niezależne od kierunku.
+    payload["events"] = _load_events()
     payload["course"] = {"kid": course[0], "etap": course[1]}
     response = jsonify(payload)
     if "kid" in request.args and "etap" in request.args:

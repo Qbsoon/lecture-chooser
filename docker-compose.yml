@@ -19,6 +19,7 @@ services:
       # trwałość zebranych danych między restartami kontenera
       - ./app/data/scraped:/lecture-chooser/app/data/scraped
       - ./app/data/exams.json:/lecture-chooser/app/data/exams.json:ro
+      - ./app/data/events.json:/lecture-chooser/app/data/events.json:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
       interval: 30s

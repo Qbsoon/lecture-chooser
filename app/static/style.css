@@ -630,6 +630,11 @@ html, body {
   font-weight: 700;
 }
 
+/* kafelek anulowany custom wydarzeniem (events.json) — przygaszony, nazwa
+   przekreślona (zakres wolnych godzin pokazuje pasiak .cal-free-span) */
+.cal-block.cancelled { opacity: 0.55; }
+.cal-block.cancelled b { text-decoration: line-through; }
+
 /* podgląd offeringu pod kursorem — przygaszona wersja zwykłego kafelka */
 .cal-block.preview {
   opacity: 0.55;
@@ -665,6 +670,24 @@ html, body {
 .cal-day-notice::after {
   background: var(--accent);
   opacity: 0.08;
+}
+
+/* zakres wolnych godzin z events.json (tryb "obecny") — pasiasta nakładka
+   tylko na przeliczonym oknie godzin (from/to), nie na cały dzień */
+.cal-free-span {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent, transparent 10px,
+    var(--danger) 10px, var(--danger) 20px
+  );
+  opacity: 0.15;
+  border-top: 1px dashed var(--danger);
+  border-bottom: 1px dashed var(--danger);
 }
 
 .cal-day-badge {

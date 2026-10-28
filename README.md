@@ -157,6 +157,45 @@ zajęć, jak w planie), `name` (nazwa egzaminu) i `date` (data `YYYY-MM-DD`):
 Egzamin zajęć wybranych w planie wyświetla się jako pasek w dniu egzaminu
 w trybie „Tydzień obecny".
 
+## Custom events / dni / godziny wolne (`app/data/events.json`)
+
+Plik edytowany ręcznie (podmontany w compose, jak `exams.json`): lista wpisów
+opisujących jednorazowe wydarzenia i własne dni/godziny wolne — uzupełnienie
+kalendarium (`calendary.html`). Pola wpisu:
+
+- `name` (wymagane) — np. `"Godziny rektorskie"`,
+- `date` (wymagane) — pierwszy dzień wpisu, `YYYY-MM-DD`,
+- `until` (opcjonalne) — ostatni dzień zakresu (włącznie); domyślnie `date`,
+- `from` (opcjonalne) — początek okna wolnego czasu, `HH:MM`,
+- `to` (opcjonalne) — koniec okna; domyślnie koniec dnia,
+- `free` (opcjonalne, domyślnie `true`) — `true` = zajęcia w oknie odpadają,
+  `false` = tylko informacja (odznaka na dniu, kafelki nietknięte).
+
+```json
+[
+  {"name": "Godziny rektorskie", "date": "2026-11-18", "from": "14:10"},
+  {"name": "Dzień rektorski", "date": "2026-12-31"},
+  {"name": "Przerwa świąteczna", "date": "2026-12-23", "until": "2026-12-27"},
+  {"name": "Godziny dziekańskie", "date": "2026-11-25", "from": "10:00", "to": "12:00"},
+  {"name": "Uroczystość uniwersytecka", "date": "2026-12-12", "free": false}
+]
+```
+
+Zasady:
+
+- wpis bez `from`/`to` to wolny cały dzień (z `until` — zakres dni),
+- od `from` (opcjonalnie ograniczony `to`) — zajęcia odpadają tylko w oknie:
+  kafelek kończący się dokładnie na `from` zostaje, kafelek zaczynający się
+  przed `from`, a kończący w oknie, odpada,
+- wpis z `free: false` nie rusza kafelków — tylko odznaka na dniu.
+
+Wydarzenia wyświetlają się w trybie **„Tydzień obecny”**: odznaka na dniu,
+pasiasta nakładka w zakresie okna godzin oraz przygaszenie (przekreślenie)
+dotkniętych kafelków — bez dodatkowych pasków w kafelkach (w trybie
+„Tydzień ogólny” ich nie ma — dotyczą konkretnych dat). Pasiak na cały dzień
+zostaje dla wpisów bez godzin (cały dzień wolny). Błędne wpisy są pomijane
+z ostrzeżeniem w logu aplikacji — plik nigdy nie zawiesza aplikacji.
+
 ## Ograniczenia wyboru (notki w tabeli planu)
 
 Jedynym źródłem ograniczeń są notki w wierszach pod nagłówkami sekcji w tabeli

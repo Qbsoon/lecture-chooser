@@ -93,6 +93,88 @@ def test_load_exams_tolerates_missing_and_broken_file(tmp_path):
     assert _load_exams(broken) == []
 
 
+def test_dataset_includes_events(monkeypatch):
+    """events.json: custom wydarzenia trafiają do /api/dataset bez filtrowania."""
+    app = _app()
+    events = [
+        {"name": "Godziny rektorskie", "date": "2026-11-18",
+         "until": "2026-11-18", "free": True, "allday": False,
+         "start": 850, "end": 1440},
+    ]
+    monkeypatch.setattr("app.main._load_events", lambda path=None: events)
+
+    async def scenario():
+        async with app.test_client() as client:
+            res = await client.get("/api/dataset")
+            assert res.status_code == 200
+            data = await res.get_json()
+            assert data["events"] == events
+
+    run(scenario())
+
+
+def test_load_events_skips_invalid_entries(tmp_path):
+    from app.main import _load_events
+
+    path = tmp_path / "events.json"
+    path.write_text(
+        json.dumps([
+            {"name": "Godziny rektorskie", "date": "2026-11-18", "from": "14:10"},
+            {"name": "Dzień rektorski", "date": "2026-12-31",
+             "until": "2027-01-02"},                                    # zakres dni
+            {"date": "2026-11-18"},                                     # brak nazwy
+            {"name": "", "date": "2026-11-18"},                         # pusta nazwa
+            {"name": "X"},                                              # brak daty
+            {"name": "X", "date": "18-11-2026"},                        # zła data
+            {"name": "X", "date": "2026-11-18", "from": "25:00"},       # zła godzina
+            {"name": "X", "date": "2026-11-18", "from": "14:10", "to": "14:10"},
+            {"name": "X", "date": "2026-11-18", "free": "tak"},         # free nie-bool
+            {"name": "X", "date": "2026-11-18", "until": "2026-11-17"},  # until < date
+            "nie-obiekt",
+        ]),
+        encoding="utf-8",
+    )
+    assert _load_events(path) == [
+        {"name": "Godziny rektorskie", "date": "2026-11-18",
+         "until": "2026-11-18", "free": True, "allday": False,
+         "start": 850, "end": 1440},
+        {"name": "Dzień rektorski", "date": "2026-12-31",
+         "until": "2027-01-02", "free": True, "allday": True,
+         "start": 0, "end": 1440},
+    ]
+
+
+def test_load_events_time_window_defaults(tmp_path):
+    from app.main import _load_events
+
+    path = tmp_path / "events.json"
+    path.write_text(
+        json.dumps([
+            {"name": "Godziny dziekańskie", "date": "2026-11-25",
+             "from": "10:00", "to": "12:00"},
+            {"name": "X", "date": "2026-11-25", "to": "09:15"},  # samo 'to' — od północy
+        ]),
+        encoding="utf-8",
+    )
+    assert _load_events(path) == [
+        {"name": "Godziny dziekańskie", "date": "2026-11-25",
+         "until": "2026-11-25", "free": True, "allday": False,
+         "start": 600, "end": 720},
+        {"name": "X", "date": "2026-11-25",
+         "until": "2026-11-25", "free": True, "allday": False,
+         "start": 0, "end": 555},
+    ]
+
+
+def test_load_events_tolerates_missing_and_broken_file(tmp_path):
+    from app.main import _load_events
+
+    assert _load_events(tmp_path / "brak.json") == []
+    broken = tmp_path / "events.json"
+    broken.write_text("{nie poprawny json", encoding="utf-8")
+    assert _load_events(broken) == []
+
+
 def test_index_page():
     app = _app()
 

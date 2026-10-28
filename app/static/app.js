@@ -49,6 +49,8 @@ let hoverZids = new Set();    // zidy do podglądu w kalendarzu (przygaszone kaf
 let openBoxes = new Set();    // rozwinięte sekcje listy (id boxa) — przetrwają re-render listy
 let courseIndex = new Map(); // zid -> {offering, course, category}
 let examByZid = new Map();   // zid -> [{name, date}] — egzaminy z exams.json
+let customEvents = [];       // wydarzenia/dni/godziny wolne z events.json (API dokleja do datasetu)
+let evDayMap = {};           // ISO date -> [wydarzenie] (date..until rozwinięte po dniach)
 let catColor = new Map();    // category.id -> kolor
 let semesterStart = "2026-10-05"; // poniedziałek 1. tygodnia (daty w linkach Google Calendar)
 let semesterWeeks = 15;           // liczba tygodni semestru
@@ -182,6 +184,14 @@ function dateBadge(iso) {
   return h("span", { class: "badge", title: "zajęcia jednorazowe (cykl nieregularny)", text: iso });
 }
 
+// Etykieta custom wydarzenia (events.json): nazwa + zakres godzin,
+// gdy wpis ograniczony godzinowo (allday → sama nazwa).
+function eventLabel(ev) {
+  if (ev.allday) return ev.name;
+  const endTxt = ev.end >= 1440 ? "" : "–" + fmtTime(ev.end);
+  return `${ev.name} ${fmtTime(ev.start)}${endTxt}`;
+}
+
 function offeringTimes(offering) {
   if (!offering.timetable.length) return h("div", { class: "no-time", text: "brak terminu w rozkładzie" });
   const parts = offering.timetable.map((e) => {
@@ -217,6 +227,19 @@ function indexData() {
   for (const ex of dataset.exams || []) {
     if (!examByZid.has(ex.zid)) examByZid.set(ex.zid, []);
     examByZid.get(ex.zid).push({ name: ex.name, date: ex.date });
+  }
+  // Custom events / dni / godziny wolne (events.json — plik ręczny, API
+  // dokleja je do datasetu). Rozwijamy zakres date..until po dniach.
+  customEvents = dataset.events || [];
+  evDayMap = {};
+  for (const ev of customEvents) {
+    const dt = new Date(ev.date + "T12:00:00");
+    const last = new Date((ev.until || ev.date) + "T12:00:00");
+    while (dt <= last) {
+      const iso = isoDate(dt);
+      (evDayMap[iso] ||= []).push(ev);
+      dt.setDate(dt.getDate() + 1);
+    }
   }
 }
 
@@ -855,11 +878,15 @@ function renderCalendar() {
   // uroczystości) — nawet gdy w danym dniu nie ma zajęć.
   const monday = calMode === "current" ? weekMonday(displayedWeek()) : null;
   const daysUsed = [...new Set(entries.map((x) => x.e.day))].sort((a, b) => a - b);
-  if (monday && calDayMap) {
+  if (monday && (calDayMap || evDayMap)) {
     for (let d = 0; d < 7; d++) {
       const dt = new Date(monday);
       dt.setDate(dt.getDate() + d);
-      if (calDayMap[isoDate(dt)] && !daysUsed.includes(d)) daysUsed.push(d);
+      const iso = isoDate(dt);
+      // Dni z kalendarium (dni wolne) i z custom wydarzeń (events.json)
+      // trafiają do siatki nawet bez zajęć.
+      if (((calDayMap && calDayMap[iso]) || (evDayMap && evDayMap[iso])) &&
+          !daysUsed.includes(d)) daysUsed.push(d);
     }
     daysUsed.sort((a, b) => a - b);
   }
@@ -923,18 +950,45 @@ function renderCalendar() {
 
   for (const d of days) {
     const dayEl = h("div", { class: "cal-day" });
-    // Nakładka dni wolnych/uroczystości (tylko tryb "obecny", v3 krok 6).
-    if (calMode === "current" && monday && calDayMap) {
+    // Nakładka dni wolnych/uroczystości (tylko tryb "obecny", v3 krok 6) +
+    // custom wydarzenia/dni/godziny wolne (events.json). Pasiak na cały dzień
+    // tylko dla dni wolnych; godziny wolne (from/to) dostają nakładkę
+    // wyłącznie na przeliczonym zakresie godzin.
+    if (calMode === "current" && monday && (calDayMap || evDayMap)) {
       const dt = new Date(monday);
       dt.setDate(dt.getDate() + d);
-      const evs = calDayMap[isoDate(dt)];
-      if (evs) {
-        const hasFree = evs.some((e) => e.free);
-        dayEl.classList.add(hasFree ? "cal-day-free" : "cal-day-notice");
+      const iso = isoDate(dt);
+      const calEvs = (calDayMap && calDayMap[iso]) || [];
+      const custEvs = (evDayMap && evDayMap[iso]) || [];
+      const dayEvs = [
+        ...calEvs,
+        ...custEvs.map((ev) => ({ label: eventLabel(ev), free: ev.free })),
+      ];
+      if (dayEvs.length) {
+        const hasFree = dayEvs.some((e) => e.free);
+        // cały dzień wolny: kalendarium albo custom wpis całodniowy (bez godzin)
+        const fullDayFree = calEvs.some((e) => e.free) ||
+          custEvs.some((ev) => ev.free && ev.allday);
+        if (fullDayFree) dayEl.classList.add("cal-day-free");
+        else if (dayEvs.some((e) => !e.free)) dayEl.classList.add("cal-day-notice");
+        // godziny wolne z oknem (from/to) — pasiasta nakładka tylko na oknie
+        for (const ev of custEvs) {
+          if (!ev.free || ev.allday) continue;
+          const s = Math.max(ev.start, minH);
+          const en = Math.min(ev.end, maxH);
+          if (en <= s) continue;
+          dayEl.append(h("div", {
+            class: "cal-free-span",
+            style: `top:${((s - minH) / (maxH - minH)) * 100}%;` +
+                   `height:${((en - s) / (maxH - minH)) * 100}%;`,
+          }));
+        }
         dayEl.append(h("div", {
           class: "cal-day-badge " + (hasFree ? "free" : "notice"),
-          title: evs.map((e) => `${e.heading} — ${e.label}`).join("\n"),
-        }, h("span", { text: evs.map((e) => e.label).join(", ") })));
+          title: dayEvs
+            .map((e) => (e.heading ? `${e.heading} — ${e.label}` : e.label))
+            .join("\n"),
+        }, h("span", { text: dayEvs.map((e) => e.label).join(", ") })));
       }
     }
     const dayLanes = laneCount.get(d) || 1; // tylko dni z kolizją mają >1 pas
@@ -951,8 +1005,18 @@ function renderCalendar() {
       const exam = calMode === "current" && e.date
         ? (examByZid.get(offering.zid) || []).find((x2) => x2.date === e.date)
         : null;
+      // Custom events / godziny wolne (events.json) — kafelek nachodzi na
+      // okno wolnego (kafelek kończący się dokładnie na `from` zostaje).
+      // Kafelek tylko przygaszony (klasa cancelled) — bez paska w środku.
+      const freeHits = calMode === "current" && e.date
+        ? (evDayMap[e.date] || [])
+            .filter((ev) => ev.free && ev.start < e.end && ev.end > e.start)
+        : [];
       const block = h("div", {
-        class: "cal-block" + (x.preview ? " preview" : "") + (hoverZid === offering.zid ? " hover" : "") + (bad.has(offering.zid) ? " collide" : ""),
+        class: "cal-block" + (x.preview ? " preview" : "") +
+               (hoverZid === offering.zid ? " hover" : "") +
+               (bad.has(offering.zid) ? " collide" : "") +
+               (freeHits.length ? " cancelled" : ""),
         style: `top:${top}%;height:${height}%;left:${left}%;width:${width}%;` +
                `border-color:${color};color:${color};` +
                (x.preview ? "" : `background:${color}22;`) +
