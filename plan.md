@@ -99,19 +99,19 @@ Nowy moduł `app/saves/` (`store.py`, `routes.py`, `ratelimit.py`) + tabela SQLi
 
 **Kryteria:** opt-in wymaga potwierdzenia mailem; każda wiadomość ma działający opt-out; zmiana danych kierunku po refreshu skutkuje digestem; subskrypcja z nie-slugu = cały kierunek, subskrypcja ze sluga = zawsze aktualnie wybrane przedmioty sluga (bez re-rejestracji po zmianie wyboru); brak SMTP = funkcja wyłączona, aplikacja działa.
 
-## Faza 5 — Stopka / prywatność (zależy od Fazy 2 i 4 — finalne parametry)
+## Faza 5 — Stopka / prywatność (zależy od Fazy 2 i 4 — finalne parametry) — UKOŃCZONA
 
-- [ ] W `templates/index.jinja2` mały link „Prywatność i dane" w stopce → modal (wzorzec istniejących pop-upów, mobile-friendly).
-- [ ] Treść modala: retention zapisów (`RETENTION_DAYS`), co przechowujemy (plan, obecność, email — tylko po opt-in), że hasła zapisów są hashowane argon2id (nigdy nieodwracalnie), ruch po HTTPS, kontakt/usuwanie danych (opt-out / usunięcie sluga).
-- [ ] W stopce newslettera: opt-out + krótkie info o przetwarzaniu.
-- [ ] Test: `tests/test_privacy_footer.py` (link i modal obecne, treść zawiera retention z env).
+- [x] W `templates/index.jinja2` mały link „Prywatność i dane” w stopce → modal (wzorzec istniejących pop-upów, mobile-friendly).
+- [x] Treść modala: retention zapisów (`RETENTION_DAYS` przez kontekst szablonu + `default(120)`), co przechowujemy (plan, obecność, email — tylko po opt-in), hasła argon2id (nigdy nieodwracalne), HTTPS, kontakt/usuwanie danych.
+- [x] W stopce newslettera: opt-out + krótkie info o przetwarzaniu (digest: opt-out per subskrypcja przy wielu obserwacjach).
+- [x] Test: `tests/test_privacy_footer.py` (link i modal obecne, treść zawiera retention z env, stopka newslettera).
 
-## Faza 6 — Hardening i dokumentacja
+## Faza 6 — Hardening i dokumentacja — UKOŃCZONA
 
-- [ ] Przegląd bezpieczeństwa: argon2id parametry, stały czas porównania slugów z hasłem (hash zawsze obecny — dummy hash dla publicznych, żeby uniknąć timing leak), brak wycieku IP w logach (hash), `Secure`/`HttpOnly`/`SameSite` na nowych ciasteczkach.
-- [ ] README: nowe env vars (retention, SMTP, limity, `TRUSTED_PROXY`), sekcja „Prywatność"; notka, że ruch idzie przez istniejącego Caddy (osobny kontener, konfiguracja poza tym repo) — ewentualne limity na poziomie proxy (np. moduł `rate_limit`) konfiguruje się tam, nie w tej aplikacji.
-- [ ] `requirements.txt`: `argon2-cffi`, `aiosmtplib`.
-- [ ] Przegląd wydajności zapisów: benchmark claim/save pod limitem (cel: <10 ms na zapis przy 20k rekordów).
+- [x] Przegląd bezpieczeństwa: argon2id parametry; **timing equalizer usunięty** (stan „czy slug ma hasło” jest i tak jawny w API — baner statusu; nie ma sekretu do ochrony); brak wycieku IP w logach (hash sha256+sekret); ciasteczka `HttpOnly`+`SameSite=Lax` — flaga `Secure` udokumentowana w README (wymaga `X-Forwarded-Proto` po stronie Caddy).
+- [x] README: nowe env vars (retention, SMTP, limity, `TRUSTED_PROXY`), sekcje „Zapisy planów na serwerze (v4)”/„Obecność (v4)”/„Newsletter (v4)”/„Prywatność”; notka o Caddy (limity proxy poza tym repo).
+- [x] `requirements.txt`: `argon2-cffi`, `aiosmtplib`.
+- [ ] Przegląd wydajności zapisów: benchmark claim/save pod limitem (cel: <10 ms na zapis przy 20k rekordów) — **odroczony do testów live** (wymaga runtime).
 
 ---
 
@@ -146,4 +146,7 @@ graph LR
 
 ## Następne zadanie
 
-**Faza 4 — Newsletter zmian na kierunku** (Fazy 1–3 ukończone; weryfikacja ręczna UI odroczona do testów live po zakończeniu całości V4).
+**V4 zakodowana w całości** (Fazy 1–6; testy pytest zielone). Pozostaje:
+1. Testy live po deployu (checklist w rozmowie): slugi/hasła, obecność, newsletter ze Stalwartem, cofanie tygodni, modal prywatności, topbar na mobile.
+2. Benchmark zapisów (Faza 6, odroczony).
+3. Deploy checklist: `TRUSTED_PROXY` = CIDR sieci Caddy, `BASE_URL` przy włączonym SMTP, `pip install -r requirements.txt` (argon2-cffi, aiosmtplib).

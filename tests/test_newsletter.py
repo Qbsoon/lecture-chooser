@@ -177,6 +177,9 @@ def test_digest_groups_multiple_subs_per_email(nl):
     assert len(nl.sent) == 1
     _to, subject, body = nl.sent[0]
     assert "kierunkach" in subject  # liczba mnoga — wiele kierunków
+    # opt-out per subskrypcja — jeden link wypisuje tylko jedną obserwację
+    assert body.count("/newsletter/out?token=") == 2
+    assert "kierunek 1" in body and "kierunek 2" in body
 
 
 def test_digest_failure_does_not_mark_sent(nl):

@@ -202,7 +202,44 @@ class NewsletterService:
             if len(blocks) > 1
             else f"Zmiany na kierunku {self._course_name(blocks[0][1])} — plan zajęć"
         )
-        await self._send_mail(email, subject, "\n".join(lines) + self._footer(blocks[0][0]))
+        await self._send_mail(email, subject, "\n".join(lines) + self._digest_footer(blocks))
+
+    def _digest_footer(self, blocks: list[tuple[dict, int, list[dict]]]) -> str:
+        """Stopka digestu: opt-out per subskrypcja (digest zbiera zmiany z
+        wielu obserwacji — jeden link wypisuje tylko jedną z nich, więc
+        przy kilku pokazujemy listę), zarządzanie i info o przetwarzaniu."""
+        from .tokens import sign_token
+
+        base = self.cfg.base_url
+        manage = sign_token(
+            {"email": blocks[0][0]["email"], "act": "manage"}, self._secret
+        )
+        lines = [
+            "\n--\n",
+            "Otrzymujesz tę wiadomość, bo obserwujesz zmiany w kreatorze planu\n"
+            "zajęć. Adres e-mail służy wyłącznie do wysyłki tych powiadomień,\n"
+            "nie jest udostępniany nikomu innemu.\n",
+        ]
+        if len(blocks) == 1:
+            sub = blocks[0][0]
+            out = sign_token(
+                {"sid": sub["id"], "email": sub["email"], "act": "out"}, self._secret
+            )
+            lines.append(f"Zrezygnuj: {base}/newsletter/out?token={out}\n")
+        else:
+            lines.append("Rezygnacja (każda obserwacja osobno):")
+            for sub, _kid, _events in blocks:
+                what = (
+                    f"kierunek {sub['kid']}" if sub["scope"] == "course"
+                    else f"zapis /s/{sub['slug']}"
+                )
+                out = sign_token(
+                    {"sid": sub["id"], "email": sub["email"], "act": "out"},
+                    self._secret,
+                )
+                lines.append(f"  - {what}: {base}/newsletter/out?token={out}")
+        lines.append(f"Zarządzaj subskrypcjami: {base}/newsletter/manage?token={manage}\n")
+        return "\n".join(lines)
 
     async def notify_slug_expired(self, slugs: list[str]) -> None:
         """Slug usunięty przez retencję → ostatni mail o wygaśnięciu
