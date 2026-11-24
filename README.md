@@ -63,10 +63,23 @@ ze zmiennych środowiskowych (te mają pierwszeństwo). Dostępne zmienne:
 
 | zmienna | wymagana | opis |
 |---|---|---|
-| `SECRET_KEY` | nie | sekret do podpisywania ciasteczka wyboru (domyślnie `dev-only-insecure-secret` — **zmień w produkcji**) |
+| `SECRET_KEY` | nie | sekret do podpisywania ciasteczka wyboru i tokenów newslettera (domyślnie `dev-only-insecure-secret` — **zmień w produkcji**) |
 | `EKUL_LOGIN` | nie | login e-KUL; włącza usługę odświeżania (bez niej worker nie startuje) |
 | `EKUL_PASSWORD` | nie | hasło e-KUL (paruje z `EKUL_LOGIN`) |
 | `FAVOURITE_KIDS` | nie | ulubione kierunki (kid ID, oddzielone przecinkami) — odświeżane codziennie o 4:00 (`favourite_refresh_hour`); działa tylko razem z `EKUL_LOGIN`/`EKUL_PASSWORD` |
+| `SAVES_DB` | nie | ścieżka bazy zapisów (domyślnie `app/data/saves/saves.db`); głównie do testów |
+| `RETENTION_DAYS` | nie | retencja zapisów — dni bez otwarcia przed usunięciem (domyślnie 120 = 4 miesiące) |
+| `MAX_SAVES` | nie | globalny limit zapisów (domyślnie 20 000; przekroczenie → 507) |
+| `MAX_SAVES_PER_IP` | nie | limit zapisów per IP (domyślnie 20; hash IP, nie identyfikacja) |
+| `TRUSTED_PROXY` | nie | adresy/sieci CIDR zaufanych proxy po przecinku (np. `172.16.0.0/12` — domyślna sieć Dockera); dopiero wtedy limity per-IP czytają prawdziwe IP klienta z `X-Forwarded-For` (skrajnie prawy niezaufany wpis); bez tego nagłówek jest ignorowany |
+| `SMTP_HOST` | nie | serwer SMTP (Stalwart); **włącza newsletter** — bez niego usługa nie startuje, a API odpowiada 503 |
+| `SMTP_PORT` | nie | port SMTP (domyślnie 587) |
+| `SMTP_USER` / `SMTP_PASSWORD` | nie | dane do uwierzytelnienia SMTP (opcjonalne) |
+| `SMTP_FROM` | nie | adres nadawcy (domyślnie `newsletter@localhost`) |
+| `SMTP_TLS` | nie | `starttls` (domyślnie) / `ssl` / `none` |
+| `BASE_URL` | nie | bazowy URL do absolutnych linków w mailach (domyślnie `http://localhost:8000`) |
+| `NEWSLETTER_DIGEST_HOUR` | nie | godzina dziennego digestu (domyślnie 18) |
+| `MAX_SUBSCRIBERS` / `MAX_SUBS_PER_EMAIL` | nie | limity subskrypcji newslettera (domyślnie 5000 / 20) |
 
 Przykładowy `.env`:
 ```
@@ -275,6 +288,59 @@ przekreślenie kolumny dnia + badge z etykietą (np. „Ferie — Boże Narodzen
 tooltip z pełną treścią wpisu. Dni z wydarzeniem bez wolnego (uroczystości) —
 subtelniejszy znacznik informacyjny.
 
+## Zapisy planów na serwerze (v4)
+
+Model „codeshare": dowolny ciąg po `/s/<slug>` (3–64 znaki `[a-z0-9._~-]`)
+można zająć jako swój — opcjonalnie z hasłem. Slug **bez hasła jest publiczny**
+(każdy z linkiem może go nadpisać), z hasłem — tylko po jego podaniu. Status
+sluga (publiczny/chroniony) jest zawsze widoczny na pasku nad kalendarzem;
+hasło można ustawić, zmienić i usunąć bez tworzenia nowego sluga.
+
+- **„Udostępnij”** tworzy/odświeża slug i udostępnia link `/s/<slug>`
+  (fallback: stary format `?z=` — działa bez zapisu na serwerze);
+- **„Zapisz”** pyta o własny adres + opcjonalne hasło;
+- zmiany wyboru i obecności zapisują się automatycznie (debounce 1 s);
+- otwarcie `/s/<slug>` **nie rusza** ciasteczka użytkownika (tryb podglądu);
+- zapisy nieużywane `RETENTION_DAYS` dni są usuwane (zadanie w tle);
+- hasła: **argon2id** (jednokierunkowe); limity anty-abuse: token bucket
+  per IP (claimy 10/h, zapisy 60/min, odczyty 120/min, hasła 10/h),
+  capy `MAX_SAVES`/`MAX_SAVES_PER_IP`, limit payloadu 64 KiB.
+
+Baza: SQLite (WAL) w `app/data/saves/saves.db` — bind-mount **katalogu**
+(pliki poboczne `-wal`/`-shm` wykluczają montowanie pojedynczego pliku).
+
+## Obecność (v4)
+
+W trybie „Tydzień obecny” klik na kafelku zajęć przełącza obecność:
+brak → obecny ✓ → nieobecny ✗ → brak. Procent widoczny na kartach przedmiotów
+i zbiorczo w pasku statusu; mianownik: spotkania **do dziś** (przełącznik
+„cały semestr” nad listą). Odwołane spotkania (dni/godziny wolne z kalendarium
+i `events.json`) nie liczą się do mianownika. Oznaczenia trzymasz lokalnie
+(localStorage), a po zapisie na serwerze — w payloadze sluga (podróżują
+z linkiem).
+
+## Newsletter (v4)
+
+Obserwowanie zmian na kierunku (przycisk „Obserwuj”): **opt-in podwójny**
+(mail potwierdzający z podpisanym linkiem), opt-out w stopce każdej wiadomości
++ strona zarządzania subskrypcjami. Dwa zakresy: **cały kierunek** (poza
+slugiem) albo **tylko przedmioty wybrane na slugu** — subskrypcja jest
+powiązana ze slugiem i rozwiązywana na żywo z jego payloadu, więc zmiana
+wyboru nie wymaga ponownej rejestracji. Digest raz dziennie
+(`NEWSLETTER_DIGEST_HOUR`); wysyłka przez SMTP (Stalwart) — bez `SMTP_HOST`
+usługa jest wyłączona. Usunięcie sluga przez retencję → ostatni mail
+o wygaśnięciu subskrypcji.
+
+## Prywatność
+
+Link „Prywatność i dane” w stopce (modal): co przechowujemy, retencja
+z env, hashowanie haseł argon2id, opt-in/opt-out newslettera. Adresy IP
+używamy wyłącznie jako jednokierunkowego hasha (sha256 + sekret) do limitów
+anty-abuse — nie budujemy z nich profili. Ruch idzie przez HTTPS za reverse
+proxy; dla ciasteczek w produkcji zalecane jest dodatkowo flaga `Secure`
+(serwer stoi za Caddy, więc ustawienie `X-Forwarded-Proto` po stronie proxy
+pozwala ją włączyć — obecnie ciasteczka mają `HttpOnly` + `SameSite=Lax`).
+
 ## Testy
 
 ```bash
@@ -286,13 +352,20 @@ pytest
 
 `docker-compose.yml` używa `image: lecture-chooser:latest` — obraz znajduje się
 w moim dockerhub (https://hub.docker.com/repository/docker/qbsoon/lecture-chooser/general)
-można też zbudować własnoręcznie (`docker build -t lecture-chooser .`). Wolumen
-`./app/data/scraped` zapewnia trwałość danych między restartami. Healthcheck
-odpytuje `/api/health` co 30 s. Zmienne `EKUL_LOGIN`/`EKUL_PASSWORD` odkomentuj
-w sekcji `environment` `docker-compose.yml`, aby włączyć usługę odświeżania.
-Listę ulubionych kierunków (`FAVOURITE_KIDS` — codzienne odświeżanie o 4:00)
-zmieniasz w tej samej sekcji; domyślnie ustawiony jest kid `6089`
-(Informatyka II stopnia).
+można też zbudować własnoręcznie (`docker build -t lecture-chooser .`). Wolumeny
+`./app/data/scraped` i `./app/data/saves` zapewniają trwałość danych między
+restartami. Healthcheck odpytuje `/api/health` co 30 s. Zmienne
+`EKUL_LOGIN`/`EKUL_PASSWORD` odkomentuj w sekcji `environment`
+`docker-compose.yml`, aby włączyć usługę odświeżania; sekcja `SMTP_*` włącza
+newsletter (Stalwart). Listę ulubionych kierunków (`FAVOURITE_KIDS` —
+codzienne odświeżanie o 4:00) zmieniasz w tej samej sekcji; domyślnie ustawiony
+jest kid `6089` (Informatyka II stopnia).
+
+Aplikacja stoi za **Caddy** (osobny kontener, konfiguracja poza tym repo) —
+limity na poziomie proxy (np. moduł `rate_limit`) konfiguruje się tam,
+nie w tej aplikacji; aplikacja czyta prawdziwe IP klienta z
+`X-Forwarded-For` po ustawieniu `TRUSTED_PROXY` na sieć, z której Caddy
+się łączy (domyślnie `172.16.0.0/12`).
 
 Dockerfile instaluje Playwright + Chromium (serwerowy PDF) oraz `fonts-liberation`
 (polskie znaki w system-ui). Bez tego `/api/selection.pdf` zwraca 503,

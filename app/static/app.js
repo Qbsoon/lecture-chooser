@@ -2497,6 +2497,21 @@ async function watchSubmit() {
   }
 }
 
+/* ---------- modal prywatności (v4 Faza 5) ---------- */
+
+function openPrivacyModal() {
+  $("privacyModal").hidden = false;
+  document.body.style.overflow = "hidden";
+}
+
+function closePrivacyModal() {
+  $("privacyModal").hidden = true;
+  // nie odblokowujemy scrolla, jeśli otwarty jest inny modal
+  document.body.style.overflow =
+    $("calendaryModal").hidden && $("slugModal").hidden && $("watchModal").hidden
+      ? "" : "hidden";
+}
+
 function buildPdf(jpeg, imgW, imgH) {
   // Minimalny, poprawny PDF 1.4: jedna strona A4 poziomo + obraz JPEG (DCTDecode).
   const pageW = 842, pageH = 595, margin = 14; // punkty (1/72 cala)
@@ -2897,6 +2912,13 @@ async function init() {
   $("watchEmailInput").addEventListener("keydown", (ev) => {
     if (ev.key === "Enter") watchSubmit();
   });
+
+  // modal prywatności (stopka)
+  $("privacyBtn").addEventListener("click", openPrivacyModal);
+  $("privacyClose").addEventListener("click", closePrivacyModal);
+  $("privacyModal").addEventListener("click", (ev) => {
+    if (ev.target === $("privacyModal")) closePrivacyModal();
+  });
   $("slugModalSave").addEventListener("click", slugModalSubmit);
   $("slugModalClose").addEventListener("click", closeSlugModal);
   $("slugModal").addEventListener("click", (ev) => {
@@ -2942,6 +2964,7 @@ async function init() {
     if (ev.key === "Escape" && !$("calendaryModal").hidden) closeCalendary();
     if (ev.key === "Escape" && !$("slugModal").hidden) closeSlugModal();
     if (ev.key === "Escape" && !$("watchModal").hidden) closeWatchModal();
+    if (ev.key === "Escape" && !$("privacyModal").hidden) closePrivacyModal();
   });
 }
 

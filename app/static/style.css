@@ -316,6 +316,20 @@ html, body {
   margin-top: 12px;
 }
 
+/* v4 Faza 5: link „Prywatność i dane” w stopce */
+.footer-link {
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  opacity: 0.75;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.footer-link:hover { opacity: 1; }
+
 /* ---------- pop-up kalendarium ---------- */
 
 .modal-overlay {

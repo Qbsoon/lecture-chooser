@@ -162,7 +162,39 @@
     <a href="https://github.com/Qbsoon/lecture-chooser" target="_blank" rel="noopener">GitHub</a>
     <span>Tworzenie wspomagał model GLM</span>
     <span>Hostowane bez współpracy z KUL przez studenta na prywatnym serwerze. Kontakt: contact@qbsoon.pl</span>
+    <button class="footer-link" id="privacyBtn" type="button" title="Co przechowujemy i jak długo">Prywatność i dane</button>
   </footer>
+
+  <!-- v4 Faza 5: prywatność — retention z env (RETENTION_DAYS), zakres danych,
+       hashowanie haseł argon2id, opt-out newslettera -->
+  <div class="modal-overlay" id="privacyModal" hidden>
+    <div class="modal-card modal-card-narrow" role="dialog" aria-modal="true" aria-labelledby="privacyTitle">
+      <div class="modal-head">
+        <h2 id="privacyTitle">Prywatność i dane</h2>
+        <button class="modal-close" id="privacyClose" type="button" aria-label="Zamknij" title="Zamknij">×</button>
+      </div>
+      <div class="modal-body">
+        <p><strong>Co przechowujemy:</strong> Twój wybór zajęć (w podpisanym ciasteczku
+          w przeglądarce), a po zapisie na serwerze („Zapisz”/„Udostępnij”) — plan,
+          oznaczenia obecności i opcjonalne hasło zapisu. Nic z tego nie musi zawierać
+          danych osobowych.</p>
+        <p><strong>Retencja:</strong> zapisy na serwerze są usuwane po
+          <strong>{{ retention_days | default(120) }} dniach</strong> bez otwarcia (licznik odświeża
+          każde wejście na link zapisu). Usunięcie jest nieodwracalne.</p>
+        <p><strong>Hasła zapisów</strong> przechowujemy wyłącznie jako hash argon2id
+          (funkcja jednokierunkowa) — nie da się ich odczytać z serwera.</p>
+        <p><strong>Newsletter:</strong> adres e-mail zapisujemy tylko po Twoim
+          potwierdzeniu linkiem z maila (opt-in) i wyłącznie do wysyłki powiadomień
+          o zmianach na obserwowanym kierunku. Rezygnacja — link w stopce każdej
+          wiadomości; adres nie jest udostępniany nikomu innemu.</p>
+        <p><strong>Połączenie:</strong> strona działa przez HTTPS (za reverse proxy);
+          adresy IP używamy wyłącznie w formie jednokierunkowego hasha do limitów
+          anty-abuse — nie budujemy z nich profili.</p>
+        <p>Pytania / usunięcie danych: contact@qbsoon.pl albo link rezygnacji
+          w newsletterze.</p>
+      </div>
+    </div>
+  </div>
 
   <script src="{{ url_for('static', filename='app.js') }}?v={{ asset_v }}"></script>
 </body>

@@ -183,7 +183,12 @@ def _load_events(path: Path | None = None) -> list[dict]:
 
 @bp.route("/")
 async def index() -> str:
-    return await render_template("index.jinja2")
+    # retention_days do treści modala prywatności (v4 Faza 5)
+    retention = getattr(current_app, "saves_store", None)
+    return await render_template(
+        "index.jinja2",
+        retention_days=retention.retention_days if retention else 120,
+    )
 
 
 @bp.route("/api/dataset")
