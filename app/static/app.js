@@ -76,6 +76,18 @@ try {
   if (raw === "current" || raw === "general") calMode = raw;
 } catch (err) {}
 
+// v4 Faza 3: obecność na zajęciach — mapa "<zid>:<klucz-spotkania>" ->
+// "present" | "absent" (brak wpisu = nieoznaczone). Klucz spotkania:
+// "<data ISO>:<start>" dla spotkań datowanych (terminarz / wpis jednorazowy),
+// "w<tydzień>:<start>" dla wystąpienia cyklicznego w konkretnym tygodniu.
+let attendance = new Map();
+// Mianownik % obecności: "today" (spotkania do dziś — domyślnie) | "semester".
+let attScope = "today";
+try {
+  const raw = localStorage.getItem("attScope");
+  if (raw === "today" || raw === "semester") attScope = raw;
+} catch (err) {}
+
 const $ = (id) => document.getElementById(id);
 
 function h(tag, attrs = {}, ...children) {
@@ -160,6 +172,121 @@ function currentWeek() {
 // Wyświetlany tydzień w trybie "obecny": curWeek (wybrany nawigacją) albo bieżący.
 function displayedWeek() {
   return curWeek ?? currentWeek();
+}
+
+/* ---------- obecność (v4 Faza 3) ---------- */
+
+// Klucz wystąpienia dla wpisu kalendarza: datowanego (terminarz albo wpis
+// jednorazowy) identyfikuje data+godzina, cyklicznego — tydzień semestru
+// + godzina (start rozdziela dwa sloty tego samego przedmiotu w tygodniu).
+function attKey(zid, e, w = displayedWeek()) {
+  const mk = e.date ? `${e.date}:${e.start}` : `w${w}:${e.start}`;
+  return `${zid}:${mk}`;
+}
+
+// Wystąpienia zajęć offeringu — spotkania z terminarza, gdy dostępne,
+// inaczej rozwinięcie cykli po tygodniach semestru (datowane = jedno
+// wystąpienie). Używane do wyliczania % obecności.
+function offeringOccurrences(offering) {
+  const out = [];
+  if (offering.meetings && offering.meetings.length) {
+    for (const m of offering.meetings) {
+      out.push({ key: `${m.date}:${m.start}`, date: m.date, start: m.start, end: m.end });
+    }
+    return out;
+  }
+  for (const e of offering.timetable) {
+    if (e.date) {
+      out.push({ key: `${e.date}:${e.start}`, date: e.date, start: e.start, end: e.end });
+      continue;
+    }
+    for (let w = 1; w <= semesterWeeks; w++) {
+      if (!cycleMatches(e.cycle, w)) continue;
+      const dt = new Date(weekMonday(w));
+      dt.setDate(dt.getDate() + e.day);
+      out.push({ key: `w${w}:${e.start}`, date: isoDate(dt), start: e.start, end: e.end });
+    }
+  }
+  return out;
+}
+
+// Czy wystąpienie odpadło (nie liczy się do mianownika %): cały dzień wolny
+// z kalendarium albo okno wolnych godzin z events.json nachodzące na spotkanie.
+function occurrenceCancelled(occ) {
+  const cal = (calDayMap && calDayMap[occ.date]) || [];
+  if (cal.some((ev) => ev.free)) return true;
+  for (const ev of (evDayMap[occ.date]) || []) {
+    if (ev.free && ev.start < occ.end && ev.end > occ.start) return true;
+  }
+  return false;
+}
+
+// Statystyka obecności zbioru zidów: {present, total}. Mianownik: wystąpienia
+// do dziś (attScope="today") lub cały semestr, bez odwołanych; nieoznaczone
+// spotkania z przeszłości obniżają % (nie są „obecne”).
+function attendanceStats(zids) {
+  let present = 0, total = 0;
+  const today = isoDate(new Date());
+  for (const zid of zids) {
+    const info = courseIndex.get(zid);
+    if (!info) continue;
+    for (const occ of offeringOccurrences(info.offering)) {
+      if (occurrenceCancelled(occ)) continue;
+      if (attScope === "today" && occ.date > today) continue;
+      total++;
+      if (attendance.get(`${zid}:${occ.key}`) === "present") present++;
+    }
+  }
+  return { present, total };
+}
+
+// Statystyka dla przedmiotu (karta na liście) — zidy jego wybranych offeringów.
+function courseAttendance(course) {
+  const planned = plannedZids();
+  const zids = course.parts.flatMap((p) =>
+    p.offerings.filter((o) => planned.has(o.zid)).map((o) => o.zid));
+  if (!zids.length) return null;
+  return attendanceStats(zids);
+}
+
+const attPct = (s) => Math.round((s.present / s.total) * 100);
+const attTone = (s) => (attPct(s) >= 90 ? "ok" : attPct(s) >= 75 ? "warn" : "err");
+
+// Klik na kafelku (tryb "obecny"): brak -> obecny -> nieobecny -> brak.
+function toggleAttendance(zid, e) {
+  const key = attKey(zid, e);
+  const cur = attendance.get(key);
+  if (cur === "present") attendance.set(key, "absent");
+  else if (cur === "absent") attendance.delete(key);
+  else attendance.set(key, "present");
+  persistAttendance();
+  render(); // kafelek + % na kartach + zbiorczy % w pasku statusu
+  scheduleSlugSave(); // autosave do zapisu serwerowego (debounce)
+}
+
+function persistAttendance() {
+  // localStorage tylko dla własnych planów (bez sluga albo sluga zapisanego
+  // w tej sesji) — edycja cudzego sluga nie może nadpisać własnej historii
+  // obecności; stan cudzego sluga żyje w pamięci i na serwerze
+  if (slug && !slugOwned) return;
+  try {
+    localStorage.setItem("attendance", JSON.stringify(Object.fromEntries(attendance)));
+  } catch (err) {}
+}
+
+function loadAttendanceLocal() {
+  try {
+    const raw = localStorage.getItem("attendance");
+    if (!raw) return;
+    const obj = JSON.parse(raw);
+    if (obj && typeof obj === "object") {
+      for (const [k, v] of Object.entries(obj)) {
+        if (typeof k === "string" && (v === "present" || v === "absent")) {
+          attendance.set(k, v);
+        }
+      }
+    }
+  } catch (err) {}
 }
 
 // Czy dwa wpisy mogą się spotkać w tym samym tygodniu — lustro
@@ -531,6 +658,23 @@ function buildPickerTools() {
     },
   });
   input.checked = hideNoTime;
+  // v4 Faza 3: mianownik % obecności — do dziś (domyślnie) albo cały semestr
+  const attInput = h("input", {
+    type: "checkbox",
+    role: "switch",
+    "aria-label": "Obecność liczona do dziś albo dla całego semestru",
+    onchange: (ev) => {
+      attScope = ev.target.checked ? "semester" : "today";
+      try { localStorage.setItem("attScope", attScope); } catch (err) {}
+      attLabel.textContent = attScope === "semester"
+        ? "Obecność: cały semestr" : "Obecność: do dziś";
+      render();
+    },
+  });
+  attInput.checked = attScope === "semester";
+  const attLabel = h("span", {
+    text: attScope === "semester" ? "Obecność: cały semestr" : "Obecność: do dziś",
+  });
   return h("div", { class: "picker-tools" },
     h("label", {
       class: "switch-row",
@@ -538,6 +682,13 @@ function buildPickerTools() {
     },
       h("span", { class: "switch" }, input, h("span", { class: "slider" })),
       h("span", { text: "Ukryj bez terminu" }),
+    ),
+    h("label", {
+      class: "switch-row",
+      title: "Mianownik procentu obecności: spotkania do dzisiaj (bieżąca frekwencja) albo wszystkie spotkania semestru.",
+    },
+      h("span", { class: "switch" }, attInput, h("span", { class: "slider" })),
+      attLabel,
     ),
   );
 }
@@ -581,6 +732,16 @@ function renderCourse(cat, course) {
     (p) => p.offerings.length > 1 && !p.offerings.some((o) => planned.has(o.zid))
   );
 
+  // v4 Faza 3: % obecności przedmiotu w semestrze (karta na liście)
+  const att = onPlan ? courseAttendance(course) : null;
+  const attChip = att && att.total > 0
+    ? h("span", {
+        class: `course-chip att ${attTone(att)}`,
+        title: `Obecność: ${att.present} z ${att.total} spotkań` +
+               (attScope === "today" ? " (do dziś)" : " (cały semestr)"),
+        text: `obecność ${attPct(att)}%`,
+      })
+    : null;
   const header = h("div", {
     class: "course-head",
     onmouseenter: () => setHoverCourse(course),
@@ -596,6 +757,7 @@ function renderCourse(cat, course) {
     missesGroup
       ? h("span", { class: "course-chip needs", text: "wybierz grupę" })
       : (onPlan ? h("span", { class: "course-chip", text: state.active ? "wybrany" : "na planie" }) : null),
+    attChip,
     h("span", { class: "kinds", text: course.parts.map((p) => p.kind).join(" + ") }),
   );
   header.style.borderLeft = `3px solid ${color}`;
@@ -1005,26 +1167,44 @@ function renderCalendar() {
       const exam = calMode === "current" && e.date
         ? (examByZid.get(offering.zid) || []).find((x2) => x2.date === e.date)
         : null;
-      // Custom events / godziny wolne (events.json) — kafelek nachodzi na
-      // okno wolnego (kafelek kończący się dokładnie na `from` zostaje).
-      // Kafelek tylko przygaszony (klasa cancelled) — bez paska w środku.
-      const freeHits = calMode === "current" && e.date
-        ? (evDayMap[e.date] || [])
-            .filter((ev) => ev.free && ev.start < e.end && ev.end > e.start)
-        : [];
+      // v4 Faza 3: data kafelka — konkretna (terminarz / wpis datowany) albo
+      // wyliczona z tygodnia dla wpisu cyklicznego; wspólny filtr odwołanych
+      // (kalendarium + events.json) dla wszystkich kafelków trybu "obecny",
+      // spójny z mianownikiem % (occurrenceCancelled)
+      const tileDate = calMode === "current"
+        ? (e.date || isoDate(new Date(
+            monday.getFullYear(), monday.getMonth(), monday.getDate() + e.day)))
+        : null;
+      const cancelled = calMode === "current" && tileDate
+        ? occurrenceCancelled({ date: tileDate, start: e.start, end: e.end })
+        : false;
+      // oznaczenie obecności: tylko kafelki planu — podgląd i odwołane
+      // nie podlegają oznaczaniu (odwołane i tak nie liczą się do %)
+      const markable = calMode === "current" && !x.preview && !cancelled;
+      const att = markable ? attendance.get(attKey(offering.zid, e)) : null;
       const block = h("div", {
         class: "cal-block" + (x.preview ? " preview" : "") +
                (hoverZid === offering.zid ? " hover" : "") +
                (bad.has(offering.zid) ? " collide" : "") +
-               (freeHits.length ? " cancelled" : ""),
+               (cancelled ? " cancelled" : "") +
+               (att ? ` att-${att}` : ""),
         style: `top:${top}%;height:${height}%;left:${left}%;width:${width}%;` +
                `border-color:${color};color:${color};` +
                (x.preview ? "" : `background:${color}22;`) +
                `--block-fg:${color}`,
-        title: `${course.name} — ${offering.group || offering.kind}`,
-        onclick: () => flashCourse(course.id),
+        title: `${course.name} — ${offering.group || offering.kind}` +
+               (markable ? " · klik: obecny ✓ / nieobecny ✗ / brak" : ""),
+        onclick: () => {
+          if (markable) toggleAttendance(offering.zid, e);
+          else flashCourse(course.id);
+        },
       },
         h("b", { text: course.name }),
+        att ? h("span", {
+          class: `att-badge ${att}`,
+          text: att === "present" ? "✓" : "✗",
+          title: att === "present" ? "obecny" : "nieobecny",
+        }) : null,
         h("div", { class: "meta" },
           h("span", { text: `${offering.group || offering.kind}` }),
           e.online
@@ -1184,6 +1364,18 @@ function renderStatus(status) {
   } else {
     chip.className = "status-chip ok";
     chip.textContent = "Plan kompletny ✓";
+  }
+
+  // v4 Faza 3: zbiorczy % obecności semestru — doklejony do stanu planu
+  const att = attendanceStats(plannedZids());
+  if (att.total > 0) {
+    chip.append(h("span", {
+      class: "att-frac",
+      title: `Obecność: ${att.present} z ${att.total} spotkań` +
+             (attScope === "today" ? " (do dziś)" : " (cały semestr)") +
+             " — oznaczaj klikając kafelki w trybie „Tydzień obecny”",
+      text: ` · obecność ${attPct(att)}%`,
+    }));
   }
 
   const panel = $("statusPanel");
@@ -1526,6 +1718,7 @@ function exportJSON() {
   }));
   downloadFile("wybor-planu.json", JSON.stringify({
     selected: [...selected], week, view,
+    attendance: Object.fromEntries(attendance), // v4 Faza 3 — backup obejmuje też obecność
     exported_at: new Date().toISOString(),
     plan,
   }, null, 2), "application/json");
@@ -1934,6 +2127,8 @@ async function shareURLText(url) {
 let slug = null;             // aktywny slug (z URL lub po zapisie)
 let slugHasPassword = false; // stan sluga na serwerze (baner statusu)
 let slugPassword = null;     // hasło w pamięci sesji — do zapisu chronionego sluga
+let slugOwned = false;       // slug utworzony/zapisany w tej sesji — tylko wtedy
+                             // localStorage obecności jest nasz do pisania
 let slugSaveTimer = null;
 
 const SLUG_RE = /^[a-z0-9._~-]{3,64}$/;
@@ -1967,7 +2162,7 @@ function slugPayload() {
     week,
     kid: course?.kid ?? null,
     etap: course?.etap ?? null,
-    attendance: {}, // v4 Faza 3: oznaczenia obecności
+    attendance: Object.fromEntries(attendance), // v4 Faza 3
   };
 }
 
@@ -2010,6 +2205,7 @@ async function saveToSlug(s, password, opts = {}) {
     if (res.ok) {
       const data = await res.json();
       slug = s;
+      slugOwned = true; // zapis pod tym slugem — od teraz nasz
       slugHasPassword = data.has_password;
       // hasło zawsze odzwierciedla ten zapis — zapis pod inny slug
       // (np. publiczny) nie może dziedziczyć starego hasła
@@ -2232,6 +2428,72 @@ async function putSlugPassword(oldPw, newPw) {
   } catch (err) {
     showSlugModalError("Brak połączenia z serwerem.");
     return false;
+  }
+}
+
+/* ---------- newsletter (v4 Faza 4) ---------- */
+
+// Zakres subskrypcji zależny od kontekstu: na /s/<slug> — tylko przedmioty
+// aktualnie wybrane na slugu (powiązane ze slugiem, zmiana wyboru nie wymaga
+// ponownego zapisu); poza slugiem — cały kierunek.
+function openWatchModal() {
+  const lead = $("watchModalLead");
+  lead.textContent = "";
+  if (slug) {
+    lead.append(`Obserwuj zapis /s/${slug} — powiadomienie, gdy dane kierunku zmienią się po odświeżeniu z e-KUL. Dotyczy przedmiotów aktualnie wybranych na tym zapisie — zmiana wyboru nie wymaga ponownego zapisu.`);
+  } else if (course) {
+    lead.append("Obserwuj cały kierunek — powiadomienie, gdy dane kierunku (plan / rozkład / terminarze) zmienią się po odświeżeniu z e-KUL. Raz dziennie zbieramy zmiany w jeden mail.");
+  } else {
+    toast("Najpierw wybierz kierunek.");
+    return;
+  }
+  $("watchEmailInput").value = "";
+  $("watchModalError").hidden = true;
+  $("watchModal").hidden = false;
+  document.body.style.overflow = "hidden";
+}
+
+function closeWatchModal() {
+  $("watchModal").hidden = true;
+  // nie odblokowujemy scrolla, jeśli otwarty jest inny modal
+  document.body.style.overflow =
+    $("calendaryModal").hidden && $("slugModal").hidden ? "" : "hidden";
+}
+
+async function watchSubmit() {
+  const email = $("watchEmailInput").value.trim();
+  const body = { email };
+  if (slug) body.slug = slug;
+  else if (course) body.kid = course.kid;
+  else return;
+  try {
+    const res = await fetch("/api/newsletter/subscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      closeWatchModal();
+      toast(data.status === "already_subscribed"
+        ? "Ten adres już obserwuje ten kierunek."
+        : "Sprawdź skrzynkę — wysłaliśmy link potwierdzający (sprawdź też spam).");
+      return;
+    }
+    const errs = {
+      400: data.error || "Podaj poprawny adres e-mail.",
+      429: "Zbyt wiele prób — odczekaj chwilę.",
+      502: "Nie udało się wysłać maila potwierdzającego — spróbuj później.",
+      503: "Newsletter jest wyłączony na serwerze.",
+      507: "Serwer osiągnął limit subskrypcji.",
+    };
+    const el = $("watchModalError");
+    el.textContent = errs[res.status] || "Nie udało się zapisać subskrypcji.";
+    el.hidden = false;
+  } catch (err) {
+    const el = $("watchModalError");
+    el.textContent = "Brak połączenia z serwerem.";
+    el.hidden = false;
   }
 }
 
@@ -2547,7 +2809,9 @@ async function init() {
   if (dataset.semester_start) semesterStart = dataset.semester_start;
   if (dataset.semester_weeks) semesterWeeks = dataset.semester_weeks;
   ensureCalendary().then(() => {
-    if (calMode === "current") renderCalendar();
+    // po kalendarium odświeżamy całość — dni wolne zmieniają mianownik %
+    // obecności (v4 Faza 3), nie tylko nakładki w kalendarzu
+    render();
   });
   indexData();
   // ?z=1,5,9 — wybór przekazany linkiem (m.in. dla serwerowego renderu PDF
@@ -2569,6 +2833,17 @@ async function init() {
     );
   } else {
     await loadSelection();
+  }
+  // v4 Faza 3: obecność — z payloadu sluga (zidy bieżącego kierunku) albo
+  // z localStorage (tryb ciasteczkowy / ?z=)
+  if (loadedSlug) {
+    attendance = new Map();
+    for (const [k, v] of Object.entries(loadedSlug.attendance || {})) {
+      if (v !== "present" && v !== "absent") continue;
+      if (courseIndex.has(Number(k.split(":")[0]))) attendance.set(k, v);
+    }
+  } else {
+    loadAttendanceLocal();
   }
   const viewParam = params.get("view");
   if (viewParam && /^(sum|A|B|w[1-4])$/.test(viewParam)) {
@@ -2613,6 +2888,15 @@ async function init() {
 
   $("shareBtn").addEventListener("click", sharePlan);
   $("saveSlugBtn").addEventListener("click", openSlugSaveModal);
+  $("watchBtn").addEventListener("click", openWatchModal);
+  $("watchModalSave").addEventListener("click", watchSubmit);
+  $("watchModalClose").addEventListener("click", closeWatchModal);
+  $("watchModal").addEventListener("click", (ev) => {
+    if (ev.target === $("watchModal")) closeWatchModal();
+  });
+  $("watchEmailInput").addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") watchSubmit();
+  });
   $("slugModalSave").addEventListener("click", slugModalSubmit);
   $("slugModalClose").addEventListener("click", closeSlugModal);
   $("slugModal").addEventListener("click", (ev) => {
@@ -2657,6 +2941,7 @@ async function init() {
   document.addEventListener("keydown", (ev) => {
     if (ev.key === "Escape" && !$("calendaryModal").hidden) closeCalendary();
     if (ev.key === "Escape" && !$("slugModal").hidden) closeSlugModal();
+    if (ev.key === "Escape" && !$("watchModal").hidden) closeWatchModal();
   });
 }
 

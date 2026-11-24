@@ -22,6 +22,11 @@ DEFAULT_RULES: dict[str, Rule] = {
     "saves_claim": (10.0, 10.0 / 3600.0),
     # operacje na hasłach: 10/h (brute force)
     "saves_password": (10.0, 10.0 / 3600.0),
+    # newsletter: zapis subskrypcji 5/h per IP, maile potwierdzające 5/dobę
+    # per adres, klikanie w linki confirm/out/manage 30/h
+    "news_subscribe": (5.0, 5.0 / 3600.0),
+    "news_email": (5.0, 5.0 / 86400.0),
+    "news_confirm": (30.0, 30.0 / 3600.0),
 }
 
 _PRUNE_THRESHOLD = 5000   # powyżej tyle kluczy sprzątamy

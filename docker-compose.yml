@@ -22,6 +22,16 @@ services:
       # 172.16.0.0/12); dopiero wtedy limity per-IP czytają prawdziwe IP
       # klienta z X-Forwarded-For (skrajnie prawy niezaufany wpis)
       TRUSTED_PROXY: "172.16.0.0/12"
+      # v4: newsletter (Stalwart). Bez SMTP_HOST usługa newslettera nie
+      # startuje — aplikacja działa normalnie (jak refresh bez EKUL_*).
+      # SMTP_HOST: "stalwart.example.com"
+      # SMTP_PORT: "587"
+      # SMTP_USER: "newsletter@twoja-domena.pl"
+      # SMTP_PASSWORD: "haslo"
+      # SMTP_FROM: "Plan zajęć <newsletter@twoja-domena.pl>"
+      # SMTP_TLS: "starttls"          # starttls | ssl | none
+      # BASE_URL: "https://plan.twoja-domena.pl"   # absolutne linki w mailach
+      NEWSLETTER_DIGEST_HOUR: "18"   # godzina dziennego digestu
       # Odkomentuj i ustaw, aby włączyć usługę odświeżania:
       # EKUL_LOGIN: twoj.login@kul.lublin.pl
       # EKUL_PASSWORD: twoje-haslo

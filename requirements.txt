@@ -4,6 +4,8 @@ lxml>=5.0
 itsdangerous>=2.1
 # Hashowanie haseł zapisów planów (v4) — argon2id.
 argon2-cffi>=23.1
+# Newsletter (v4) — wysyłka przez SMTP (Stalwart).
+aiosmtplib>=3.0
 # Wektorowy PDF renderowany na serwerze (opcjonalny w runtime — bez tego
 # endpoint zwraca 503, a PDF powstaje w przeglądarce).
 # Wymaga też przeglądarki: `playwright install chromium`

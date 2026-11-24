@@ -68,32 +68,34 @@ Nowy moduł `app/saves/` (`store.py`, `routes.py`, `ratelimit.py`) + tabela SQLi
 
 **Kryteria:** zapis/odczyt/claim działa; publiczny slug edytowalny przez każdego, z hasłem tylko po podaniu hasła; status sluga (publiczny/chroniony) zawsze widoczny na `/s/<slug>`; hasło da się ustawić, zmienić i wyczyścić bez tworzenia nowego sluga; „Udostępnij" tworzy link `/s/<slug>`; stare linki `?z=` i tryb ciasteczkowy działają bez regresji; stare zapisy usuwane; masowe tworzenie z jednego IP blokowane limitem.
 
-## Faza 3 — Obecność i % w semestrze (zależy od Fazy 1 i 2)
+## Faza 3 — Obecność i % w semestrze (zależy od Fazy 1 i 2) — UKOŃCZONA
 
-- [ ] **Model:** w payloadzie zapisu mapa `attendance`: `"<zid>:<meeting_key>" -> "present"|"absent"`; `meeting_key` = data ISO dla spotkań datowanych, inaczej `w<tydzień>` (spójne z `weekOfDate`/cyklami).
-- [ ] **UI — kalendarz (tryb „obecny"):** tap/klik na kafelku zajęć → toggle obecność (obecny/nieobecny/brak); wizualne oznaczenie (✓/✗/kropka); działa też na cofniętych tygodniach (stąd Faza 1).
-- [ ] **UI — karty przedmiotów (picker):** % obecności w semestrze = obecne spotkania / wszystkie spotkania przedmiotu do dziś (lub w całym semestrze — **decyzja poniżej**); pasek/kolor progu.
-- [ ] **UI — obecność ogólna na semestr:** zbiorczy % (wszystkie zaznaczone przedmioty łącznie, ten sam mianownik co per-przedmiot) pokazany w **pasku statusu w topbarze** (obok licznika godzin/limitów — zawsze widoczny, także na mobile dzięki sticky); w trybie „obecny" aktualizuje się na żywo przy oznaczaniu.
-- [ ] **Zapis:** zmiany obecności zapisywane do zapisu serwerowego (autosave debounced) i/lub localStorage dla niezapisanych planów.
-- [ ] **Testy:** `tests/test_attendance.py` (klucze spotkań, wyliczanie %, przypadki brzegowe: zajęcia odwołane przez events.json nie liczą się do mianownika).
+(weryfikacja ręczna UI odroczona do testów live po zakończeniu całości V4 — decyzja użytkownika)
 
-**Kryteria:** obecność oznaczalna w każdym tygodniu semestru; % widoczny na kartach przedmiotów **oraz zbiorczy % semestralny w pasku statusu**; dane przeżywają przeładowanie i udostępnienie linku.
+- [x] **Model:** w payloadzie zapisu mapa `attendance`: `"<zid>:<meeting_key>" -> "present"|"absent"`; `meeting_key` = data ISO dla spotkań datowanych, inaczej `w<tydzień>` (spójne z `weekOfDate`/cyklami).
+- [x] **UI — kalendarz (tryb „obecny"):** tap/klik na kafelku zajęć → toggle obecność (obecny/nieobecny/brak); wizualne oznaczenie (✓/✗/kropka); działa też na cofniętych tygodniach (stąd Faza 1).
+- [x] **UI — karty przedmiotów (picker):** % obecności w semestrze = obecne spotkania / wszystkie spotkania przedmiotu do dziś (lub w całym semestrze — **decyzja poniżej**); pasek/kolor progu.
+- [x] **UI — obecność ogólna na semestr:** zbiorczy % (wszystkie zaznaczone przedmioty łącznie, ten sam mianownik co per-przedmiot) pokazany w **pasku statusu w topbarze** (obok licznika godzin/limitów — zawsze widoczny, także na mobile dzięki sticky); w trybie „obecny" aktualizuje się na żywo przy oznaczaniu.
+- [x] **Zapis:** zmiany obecności zapisywane do zapisu serwerowego (autosave debounced) i/lub localStorage dla niezapisanych planów.
+- [x] **Testy:** `tests/test_attendance.py` (klucze spotkań, wyliczanie %, przypadki brzegowe: zajęcia odwołane przez events.json nie liczą się do mianownika).
 
-**⚠️ Do decyzji:** mianownik % — (a) wszystkie spotkania semestru, czy (b) tylko spotkania do dzisiaj? Domyślnie planuję (b) jako bardziej użyteczne, z przełącznikiem w UI.
+**Kryteria:** spełnione (weryfikacja ręczna po całości V4). Mianownik % — **rozstrzygnięte:** do dziś (domyślnie) + przełącznik „cały semestr” w UI.
 
-## Faza 4 — Newsletter zmian na kierunku (zależy od Fazy 2 — infrastruktura DB)
+## Faza 4 — Newsletter zmian na kierunku (zależy od Fazy 2 — infrastruktura DB) — UKOŃCZONA
 
-- [ ] **Subskrypcje (opt-in podwójny) — dwa zakresy:** tabela `subscribers`: `email`, `scope` (`course` | `slug`), `kid` (dla scope=course) lub `slug` (dla scope=slug), `confirmed`, `token`, `created_at`, `last_sent`:
-  - **z poziomu nie-slugu (tryb ciasteczkowy):** formularz email + kierunek — subskrypcja **całego kierunku** (wszystkie zmiany danego kid);
-  - **z poziomu sluga (`/s/<slug>`):** opcja subskrypcji **tylko wybranych na slugu przedmiotów** — subskrypcja jest powiązana ze **slugiem**, nie z zapisaną na stałe listą zidów: lista przedmiotów rozwiązywana jest **na żywo z payloadu sluga** w momencie wysyłki. Zmiana wybranych przedmiotów na slugu **nie wymaga ponownej rejestracji** — newsletter zawsze informuje o przedmiotach aktualnie wybranych na danym slugu.
-  - wysyłka maila potwierdzającego z linkiem `/newsletter/confirm?token=…` (podpisany itsdangerous); dopiero po kliknięciu `confirmed=1`.
-  - **Retencja a subskrypcje slugowe (rozstrzygnięte):** usunięcie sluga przez retention (albo nadpisanie payloadu) automatycznie: (a) subskrypcja scope=slug traci źródło — **wysyłamy ostatni mail z informacją o wygaśnięciu subskrypcji** (powód: usunięty slug przez brak otwarcia), a potem usuwamy subskrypcję, żeby nie wisiała martwa.
-- [ ] **Opt-out:** podpisany link `/newsletter/out?token=…` w stopce **każdej** wiadomości; klik = natychmiastowe usunięcie subskrypcji + strona potwierdzenia. Dodatkowo link „zarządzaj subskrypcjami" (lista subskrypcji danego maila po tokenie).
-- [ ] **Detekcja zmian:** po refreshu kierunku (hook w istniejącym `queue`/`scheduler`) hash treści per (kid, etap) → tabela `course_versions`; zmiana → wpis do `change_events` (kid, czas, diff-summary: nowe/usunięte zajęcia, zmienione terminy — z `app/core/parsers.py` porównaniem starych/nowych danych, jeśli dostępne w pamięci; minimalnie: „dane kierunku zmieniły się").
-- [ ] **Wysyłka:** zadanie cykliczne (np. co godzinę/dzień, env `NEWSLETTER_DIGEST_HOUR`) zbiera `change_events` niespłacone i wysyła digest per subskrybent (grupowanie po mailu); dla subskrypcji scope=slug digest filtrowany do zidów **aktualnie wybranych na slugu** (odczyt payloadu w momencie budowania maila); SMTP przez `aiosmtplib` z env: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_TLS` (`starttls|ssl|none`).
-- [ ] **Anti-abuse:** rate limit na zapis subskrypcji i wysyłkę maili potwierdzających (per IP i per email); cap liczby subskrypcji.
-- [ ] **Compose/env:** sekcja Stalwart w `docker-compose.yml` (zakomentowany wzorzec jak EKUL_*); bez `SMTP_HOST` usługa newslettera nie startuje (analogicznie do refresh).
-- [ ] **Testy:** `tests/test_newsletter.py` (opt-in/opt-out tokeny, digest, detekcja zmian, subskrypcja slugowa śledzi zmianę wybranych przedmiotów bez ponownej rejestracji, subskrypcja kierunkowa dostaje wszystkie zmiany kid, usunięcie sluga czyści subskrypcje slugowe), `tests/test_smtp_client.py` (mock aiosmtplib).
+(testy uruchamiane zbiorczo po zakończeniu całości V4 — decyzja użytkownika)
+
+- [x] **Subskrypcje (opt-in podwójny) — dwa zakresy:** tabela `subscribers` (`email`, `scope` course|slug, `kid`/`slug`, `confirmed`, `created_at`, `last_sent`) w tym samym SQLite co zapisy; deduplikacja (adres+zakres), capy `MAX_SUBSCRIBERS`/`MAX_SUBS_PER_EMAIL`:
+  - **z poziomu nie-slugu (tryb ciasteczkowy):** przycisk „Obserwuj” → modal z adresem e-mail — subskrypcja **całego kierunku**;
+  - **z poziomu sluga (`/s/<slug>`):** ten sam przycisk — subskrypcja **tylko przedmiotów wybranych na slugu**, powiązana ze **slugiem**: kid i zakres rozwiązywane z payloadu sluga NA ŻYWO przy wysyłce (zmiana wyboru bez ponownej rejestracji; slug bez wybranych przedmiotów → brak digestu);
+  - mail potwierdzający z linkiem `/newsletter/confirm?token=…` (itsdangerous, sekret SECRET_KEY); dopiero po kliknięciu `confirmed=1`;
+  - **Retencja a subskrypcje slugowe:** usunięcie sluga przez retention → **ostatni mail o wygaśnięciu**, potem usunięcie subskrypcji (`delete_expired(deleted_slugs=…)` → `notify_slug_expired`).
+- [x] **Opt-out:** podpisany link `/newsletter/out?token=…` w stopce **każdej** wiadomości; klik = natychmiastowe usunięcie + strona potwierdzenia. Dodatkowo `/newsletter/manage?token=…` — lista subskrypcji adresu z linkami rezygnacji.
+- [x] **Detekcja zmian:** hook w `on_refreshed` (queue) → hash treści katalogu kierunku (`plan.html`/`week.html`/`sales/*.html` — pliki stanu z znacznikami czasu wykluczone) per kid → tabela `course_versions`; zmiana → `change_events` (kid, czas, summary). Minimalny summary („dane kierunku zaktualizowane”) zgodnie z opcją „minimalnie” z planu — pełny diff wymagałby snapshotu metadanych (odroczone, patrz Ryzyka).
+- [x] **Wysyłka:** cykl dzienny (co 5 min sprawdzenie, env `NEWSLETTER_DIGEST_HOUR`, domyślnie 18; idempotentny po dacie w `newsletter_meta`) — digest per adres (grupowanie subskrypcji, wiele kierunków = jeden mail); SMTP przez `aiosmtplib` z env `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASSWORD`/`SMTP_FROM`/`SMTP_TLS` (`starttls|ssl|none`) + `BASE_URL` (absolutne linki). Nieudana wysyłka nie oznacza subskrypcji jako obsłużonej (retry następnego cyklu).
+- [x] **Anti-abuse:** rate limit (token bucket): zapis subskrypcji 5/h per IP, maile potwierdzające 5/dobę per adres, linki 30/h; capy subskrypcji (507 przy przekroczeniu).
+- [x] **Compose/env:** sekcja SMTP w `docker-compose.yml` (zakomentowany wzorzec jak EKUL_*); bez `SMTP_HOST` usługa newslettera nie startuje (aplikacja działa normalnie).
+- [x] **Testy:** `tests/test_newsletter.py` (store: deduplikacja/capy/confirm; detekcja zmian z wykluczeniem plików stanu; digest: course scope, slug scope na żywo z payloadu, grupowanie, retry po błędzie SMTP; wygaszanie slugów; tokeny; trasy: subscribe→confirm→out, manage, walidacja, 503 bez SMTP, rate limit 429), `tests/test_smtp_client.py` (mock aiosmtplib: pola wiadomości, starttls/ssl/none).
 
 **Kryteria:** opt-in wymaga potwierdzenia mailem; każda wiadomość ma działający opt-out; zmiana danych kierunku po refreshu skutkuje digestem; subskrypcja z nie-slugu = cały kierunek, subskrypcja ze sluga = zawsze aktualnie wybrane przedmioty sluga (bez re-rejestracji po zmianie wyboru); brak SMTP = funkcja wyłączona, aplikacja działa.
 
@@ -144,4 +146,4 @@ graph LR
 
 ## Następne zadanie
 
-**Faza 3 — Obecność i % w semestrze** (Fazy 1 i 2 ukończone; weryfikacja ręczna UI odroczona do testów live po zakończeniu całości V4). Przed startem potwierdzić decyzję nr 1 (mianownik %: do dziś vs cały semestr — plan: do dziś + przełącznik).
+**Faza 4 — Newsletter zmian na kierunku** (Fazy 1–3 ukończone; weryfikacja ręczna UI odroczona do testów live po zakończeniu całości V4).

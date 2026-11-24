@@ -347,19 +347,29 @@ class SavesStore:
 
     # ---------- retencja ----------
 
-    def delete_expired(self, *, now: float | None = None) -> int:
+    def delete_expired(
+        self, *, now: float | None = None, deleted_slugs: list | None = None
+    ) -> int:
         """Usuwa zapisy nieużywane dłużej niż ``retention_days``.
 
         Zwraca liczbę usuniętych. Idempotentne — wywoływane cyklicznie
-        przez zadanie w tle (i raz przy starcie aplikacji).
+        przez zadanie w tle (i raz przy starcie aplikacji). Gdy podano
+        ``deleted_slugs`` (listę), wypełnia ją slugami usuniętych zapisów
+        — newsletter wysyła subskrybentom mail o wygaśnięciu.
         """
         ts = time.time() if now is None else float(now)
         cutoff = ts - self.retention_days * 86400.0
+        slugs = [
+            r[0] for r in self._conn.execute(
+                "SELECT slug FROM saves WHERE last_opened < ?", (cutoff,)
+            ).fetchall()
+        ]
         cur = self._conn.execute(
             "DELETE FROM saves WHERE last_opened < ?", (cutoff,)
         )
         self._conn.commit()
-        if cur.rowcount:
+        if cur.rowcount and deleted_slugs is not None:
+            deleted_slugs.extend(slugs)
             logger.info("retencja: usunięto %d zapisów (cutoff %s)", cur.rowcount, cutoff)
         return cur.rowcount
 

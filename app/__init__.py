@@ -13,6 +13,10 @@ from quart import Quart
 from .core.dataset import DatasetCache
 from .logic.pdf import close_pdf_renderer
 from .main import bp
+from .newsletter.routes import bp as newsletter_bp
+from .newsletter.service import NewsletterService
+from .newsletter.smtp import SmtpConfig
+from .newsletter.store import NewsletterStore
 from .saves.ratelimit import RateLimiter
 from .saves.routes import bp as saves_bp
 from .saves.store import SavesStore
@@ -127,10 +131,8 @@ def create_app(data_dir: str | None = None) -> Quart:
     # nie bind-mountu pojedynczego pliku). Ścieżkę można nadpisać env
     # ``SAVES_DB`` (pełna ścieżka do pliku) — używane w testach.
     env = {**_read_dotenv(Path(__file__).resolve().parent.parent / ".env"), **os.environ}
-    saves_db = env.get("SAVES_DB") or str(
-        (Path(data_dir) if data_dir else Path(__file__).resolve().parent / "data")
-        / "saves" / "saves.db"
-    )
+    data_root = Path(data_dir) if data_dir else Path(__file__).resolve().parent / "data"
+    saves_db = env.get("SAVES_DB") or str(data_root / "saves" / "saves.db")
     app.saves_store = SavesStore(
         saves_db,
         retention_days=_env_int(env.get("RETENTION_DAYS"), 120),
@@ -145,6 +147,27 @@ def create_app(data_dir: str | None = None) -> Quart:
         env.get("TRUSTED_PROXY")
     )
 
+    # v4 Faza 4: newsletter (Stalwart przez SMTP). Bez SMTP_HOST usługa
+    # nie startuje — aplikacja działa normalnie (jak refresh bez EKUL_*).
+    smtp_cfg = SmtpConfig.from_env(env)
+    app.newsletter = None
+    if smtp_cfg.host:
+        app.newsletter = NewsletterService(
+            NewsletterStore(
+                saves_db,
+                max_subscribers=_env_int(env.get("MAX_SUBSCRIBERS"), 5000),
+                max_subs_per_email=_env_int(env.get("MAX_SUBS_PER_EMAIL"), 20),
+            ),
+            app.saves_store,
+            smtp_cfg,
+            data_root,
+            secret=app.config["SECRET_KEY"],
+            digest_hour=_env_int(env.get("NEWSLETTER_DIGEST_HOUR"), 18),
+        )
+    # blueprint zawsze — bez SMTP trasy odpowiadają 503 (zamiast 404)
+    # i wyjaśniają, że newsletter jest wyłączony na serwerze
+    app.register_blueprint(newsletter_bp)
+
     @app.before_serving
     async def _start_retention() -> None:
         store = app.saves_store
@@ -153,7 +176,12 @@ def create_app(data_dir: str | None = None) -> Quart:
             # raz od razu (nadrabia przestoje), potem co 6 h — idempotentne
             while True:
                 try:
-                    store.delete_expired()
+                    deleted: list[str] = []
+                    store.delete_expired(deleted_slugs=deleted)
+                    # v4 Faza 4: usunięte slugi → ostatni mail o wygaśnięciu
+                    # subskrypcji slugowych, potem ich usunięcie
+                    if deleted and app.newsletter is not None:
+                        await app.newsletter.notify_slug_expired(deleted)
                 except Exception:  # pragma: no cover — defensywnie
                     logger.exception("retencja zapisów: błąd cyklu")
                 await asyncio.sleep(6 * 3600)
@@ -178,8 +206,17 @@ def create_app(data_dir: str | None = None) -> Quart:
     if refresh_service is not None:
         refresh_queue, refresher = refresh_service
         # po udanym odświeżeniu kierunku wyrzuć jego datasety z cache —
-        # kolejne żądanie zbuduje je od nowa z nowych plików na dysku
-        refresh_queue.on_refreshed = app.datasets.invalidate
+        # kolejne żądanie zbuduje je od nowa z nowych plików na dysku;
+        # v4 Faza 4: ten sam hook zasila detekcję zmian newslettera
+        def _on_refreshed(kid: int) -> None:
+            app.datasets.invalidate(kid)
+            if app.newsletter is not None:
+                try:
+                    app.newsletter.on_course_refreshed(kid)
+                except Exception:  # detekcja nie może wywrócić workera
+                    logger.exception("newsletter: detekcja zmian (kid=%d)", kid)
+
+        refresh_queue.on_refreshed = _on_refreshed
         app.refresh_queue = refresh_queue
         app.refresh_task: asyncio.Task | None = None
 
@@ -218,6 +255,25 @@ def create_app(data_dir: str | None = None) -> Quart:
     @app.after_serving
     async def _close_pdf_renderer() -> None:
         await close_pdf_renderer()
+
+    # v4 Faza 4: cykl digestu newslettera (raz dziennie o NEWSLETTER_DIGEST_HOUR)
+    @app.before_serving
+    async def _start_newsletter() -> None:
+        if app.newsletter is None:
+            return
+        app.newsletter_task: asyncio.Task | None = asyncio.create_task(
+            app.newsletter.digest_loop()
+        )
+
+    @app.after_serving
+    async def _stop_newsletter() -> None:
+        task = getattr(app, "newsletter_task", None)
+        if task is not None:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+        if app.newsletter is not None:
+            app.newsletter.close()
 
     return app
 

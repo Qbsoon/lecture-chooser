@@ -416,6 +416,9 @@ html, body {
 }
 
 .status-chip.ok { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+
+/* v4 Faza 3: zbiorczy % obecności doklejony do stanu planu */
+.status-chip .att-frac { font-weight: 700; }
 .status-chip.warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
 .status-chip.err { background: var(--danger-soft); color: var(--danger); border-color: transparent; }
 
@@ -658,6 +661,24 @@ html, body {
 
 .badge.hybrid { border-style: dashed; font-style: italic; }
 
+/* v4 Faza 3: oznaczenie obecności kafelka (tryb "obecny") — obrys przed
+   .collide w kolejności pliku, więc kolizja (pilniejsze) wygrywa przy obu */
+.cal-block.att-present { outline: 2px solid var(--ok); outline-offset: -2px; }
+.cal-block.att-absent { outline: 2px solid var(--danger); outline-offset: -2px; }
+
+.att-badge {
+  position: absolute;
+  top: 3px;
+  right: 5px;
+  font-size: 0.8rem;
+  font-weight: 800;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.att-badge.present { color: var(--ok); }
+.att-badge.absent { color: var(--danger); }
+
 .cal-block.collide { outline: 2px solid var(--danger); outline-offset: -2px; }
 
 /* pasek egzaminu wewnątrz kafelka zajęć (tryb "obecny", exams.json):
@@ -784,7 +805,7 @@ html, body {
 .p-note { font-size: 0.78rem; color: var(--muted); margin: -6px 0 10px; }
 
 /* przełącznik „ukryj bez terminu” nad sekcjami listy */
-.picker-tools { display: flex; justify-content: flex-start; padding: 10px 12px 0; margin-bottom: 10px; }
+.picker-tools { display: flex; justify-content: flex-start; flex-wrap: wrap; gap: 4px 18px; padding: 10px 12px 0; margin-bottom: 10px; }
 
 .switch-row {
   display: inline-flex;
@@ -934,6 +955,11 @@ details.coll-box > summary .dot { width: 10px; height: 10px; border-radius: 50%;
 }
 
 .course-chip.needs { background: var(--warn-soft); color: var(--warn); }
+
+/* v4 Faza 3: % obecności na karcie przedmiotu */
+.course-chip.att.ok { background: var(--ok-soft); color: var(--ok); }
+.course-chip.att.warn { background: var(--warn-soft); color: var(--warn); }
+.course-chip.att.err { background: var(--danger-soft); color: var(--danger); }
 
 .offering {
   display: flex;
