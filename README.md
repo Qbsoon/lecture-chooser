@@ -292,12 +292,18 @@ subtelniejszy znacznik informacyjny.
 
 Model „codeshare": dowolny ciąg po `/s/<slug>` (3–64 znaki `[a-z0-9._~-]`)
 można zająć jako swój — opcjonalnie z hasłem. Slug **bez hasła jest publiczny**
-(każdy z linkiem może go nadpisać), z hasłem — tylko po jego podaniu. Status
-sluga (publiczny/chroniony) jest zawsze widoczny na pasku nad kalendarzem;
-hasło można ustawić, zmienić i usunąć bez tworzenia nowego sluga.
+(każdy z linkiem może go nadpisać); **z hasłem odczyt i zapis wymagają
+hasła** — bez niego strona prosi o hasło na czystym tle, a payload nie
+opuszcza serwera. Status sluga (publiczny/chroniony) jest zawsze widoczny
+na pasku nad kalendarzem; hasło można ustawić, zmienić i usunąć bez
+tworzenia nowego sluga. Wejście na **wolny** adres renderuje stronę
+(„adres wolny”) — pierwsza edycja albo „Udostępnij” zajmuje go bieżącym
+planem; bez edycji adres zostaje wolny.
 
-- **„Udostępnij”** tworzy/odświeża slug i udostępnia link `/s/<slug>`
-  (fallback: stary format `?z=` — działa bez zapisu na serwerze);
+- **„Udostępnij”**: na slugu automatycznie zapisuje bieżący stan (zajęcie
+  wolnego adresu / flush zmian) i udostępnia URL tego sluga; bez sluga
+  tworzy nowy (zapamiętany, o ile istnieje, inaczej losowy) jako kopię
+  planu localStorage (fallback: stary format `?z=` — działa bez serwera);
 - **„Zapisz”** pyta o własny adres + opcjonalne hasło;
 - zmiany wyboru i obecności zapisują się automatycznie (debounce 1 s);
 - otwarcie `/s/<slug>` **nie rusza** ciasteczka użytkownika (tryb podglądu);

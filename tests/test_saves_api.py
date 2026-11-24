@@ -139,6 +139,27 @@ def test_password_endpoint_lifecycle(app):
     run(scenario())
 
 
+def test_get_protected_slug_requires_password(app):
+    """Hasło chroni też ODCZYT — bez poprawnego hasła payload nie wychodzi."""
+    async def scenario():
+        async with app.test_client() as client:
+            await _post(client, "chron-view", {"selected": [1]}, password="sekret")
+            res = await client.get("/api/saves/chron-view")
+            assert res.status_code == 401
+            assert (await res.get_json())["error"] == "password_required"
+            res = await client.get(
+                "/api/saves/chron-view", headers={"X-Slug-Password": "złe"}
+            )
+            assert res.status_code == 401
+            res = await client.get(
+                "/api/saves/chron-view", headers={"X-Slug-Password": "sekret"}
+            )
+            assert res.status_code == 200
+            assert (await res.get_json())["payload"]["selected"] == [1]
+
+    run(scenario())
+
+
 def test_get_missing_and_invalid_slug(app):
     async def scenario():
         async with app.test_client() as client:
@@ -147,8 +168,10 @@ def test_get_missing_and_invalid_slug(app):
             # za krótki slug w ścieżce strony → 404
             res = await client.get("/s/ab")
             assert res.status_code == 404
+            # wolny slug (poprawny format, brak zapisu) → strona renderuje się
+            # z 200 — frontend oferuje zajęcie adresu (model codeshare)
             res = await client.get("/s/nie-ma")
-            assert res.status_code == 404
+            assert res.status_code == 200
 
     run(scenario())
 

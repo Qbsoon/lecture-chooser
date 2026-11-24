@@ -265,13 +265,26 @@ function toggleAttendance(zid, e) {
 }
 
 function persistAttendance() {
-  // localStorage tylko dla własnych planów (bez sluga albo sluga zapisanego
-  // w tej sesji) — edycja cudzego sluga nie może nadpisać własnej historii
-  // obecności; stan cudzego sluga żyje w pamięci i na serwerze
-  if (slug && !slugOwned) return;
+  // model: root (bez sluga) → obecność edytuje localStorage; na slugu →
+  // edytuje slug (autosave). Zero mieszania — jedyna interakcja to kopia
+  // stanu localStorage do nowego sluga przy „Udostępnij” z roota
+  if (slug) return;
   try {
     localStorage.setItem("attendance", JSON.stringify(Object.fromEntries(attendance)));
   } catch (err) {}
+}
+
+// Chip % obecności pojedynczego offeringu (wykład / laboratorium osobno,
+// nie suma dla całego przedmiotu).
+function offeringAttChip(zid) {
+  const s = attendanceStats([zid]);
+  if (!s.total) return null;
+  return h("span", {
+    class: `offering-att ${attTone(s)}`,
+    title: `Obecność: ${s.present} z ${s.total} spotkań` +
+           (attScope === "today" ? " (do dziś)" : " (cały semestr)"),
+    text: `obecność ${attPct(s)}%`,
+  });
 }
 
 function loadAttendanceLocal() {
@@ -287,6 +300,70 @@ function loadAttendanceLocal() {
       }
     }
   } catch (err) {}
+}
+
+// Aplikuje payload sluga do stanu strony: dataset kierunku z payloadu
+// (nocookie=1 — ciasteczko użytkownika nietknięte), wybór, tydzień, obecność.
+// Używane przy otwarciu /s/<slug> i po odblokowaniu hasłem.
+async function applySlugPayload(payload) {
+  if (payload.kid != null && payload.etap != null &&
+      (!course || course.kid !== payload.kid || course.etap !== payload.etap)) {
+    try {
+      const res = await fetch(`/api/dataset?kid=${payload.kid}&etap=${payload.etap}&nocookie=1`);
+      if (!res.ok) throw new Error("dataset");
+      dataset = await res.json();
+      course = dataset.course || null;
+      if (dataset.semester_start) semesterStart = dataset.semester_start;
+      if (dataset.semester_weeks) semesterWeeks = dataset.semester_weeks;
+      indexData();
+      openBoxes = new Set(); // rozwinięte sekcje dotyczyły poprzedniego kierunku
+      view = "sum";
+      curWeek = null;
+      picked = { ...course };
+      renderCourseBar();
+    } catch (err) {
+      toast("Nie udało się wczytać danych kierunku z zapisu.");
+      return false;
+    }
+  }
+  selected = new Set((payload.selected || []).filter((n) => courseIndex.has(n)));
+  week = payload.week || 1;
+  attendance = new Map();
+  for (const [k, v] of Object.entries(payload.attendance || {})) {
+    if (v !== "present" && v !== "absent") continue;
+    if (courseIndex.has(Number(k.split(":")[0]))) attendance.set(k, v);
+  }
+  render();
+  renderSlugBar();
+  return true;
+}
+
+// Odblokowanie chronionego sluga: GET z hasłem w nagłówku. Celowo NIE
+// zapis (POST nadpisałby payload planu bieżącym, pustym stanem).
+async function unlockSlug(pw) {
+  try {
+    const res = await fetch(`/api/saves/${encodeURIComponent(slug)}`, {
+      headers: { "X-Slug-Password": pw },
+    });
+    if (!res.ok) {
+      showSlugModalError(
+        res.status === 401 ? "Złe hasło." : "Nie udało się odblokować zapisu."
+      );
+      return false;
+    }
+    const rec = await res.json();
+    slugPassword = pw;
+    slugHasPassword = true;
+    slugLocked = false;
+    document.body.classList.remove("slug-locked");
+    rememberSlug(slug, pw);
+    const ok = await applySlugPayload(rec.payload || {});
+    if (ok) renderSlugBar();
+    return ok;
+  } catch (err) {
+    showSlugModalError("Brak połączenia z serwerem.");
+    return false;
+  }
 }
 
 // Czy dwa wpisy mogą się spotkać w tym samym tygodniu — lustro
@@ -796,6 +873,8 @@ function renderCourse(cat, course) {
             o.teachers.length ? h("span", { class: "meta-t", text: ` · ${o.teachers.join(", ")}` }) : null,
           ),
           offeringTimes(o),
+          // v4 Faza 3: % obecności per offering (wykład / laboratorium osobno)
+          planned.has(o.zid) ? offeringAttChip(o.zid) : null,
         ),
       );
       rows.push(row);
@@ -2078,15 +2157,26 @@ async function sharePlan() {
     toast("Najpierw wybierz zajęcia — inaczej link prowadzi do pustego planu.");
     return;
   }
-  // v4: „Udostępnij” tworzy/odświeża slug i udostępnia link /s/<slug>
-  // (odbiorca widzi plan; jego własny wybór/ciasteczko zostają nietknięte).
-  // Kolejno: zapamiętany slug (o ile istnieje na serwerze), potem świeży
-  // losowy. Gdy nic się nie uda (limit, chroniony bez hasła, brak sieci) —
-  // spadamy do starego linku ?z=, który działa bez zapisu na serwerze.
+  // Na slugu: udostępniamy TEN slug — najpierw automatyczny zapis bieżącego
+  // stanu (zajęcie wolnego adresu / flush zmian czekających w debounce),
+  // potem URL (telefon: systemowe okno, PC: schowek).
+  // Bez sluga (plan localStorage): nowy slug jako kopia stanu — zapamiętany,
+  // o ile istnieje na serwerze, inaczej losowy. Gdy zapis się nie uda
+  // (limit, brak sieci) — stary link ?z= działa bez zapisu na serwerze.
+  if (slug) {
+    if (await saveToSlug(slug, slugPassword, { silent: true })) {
+      await shareURLText(slugURL(slug));
+      return;
+    }
+    await shareURLText(shareURL());
+    return;
+  }
   const candidates = [];
   const stored = storedSlug();
-  if (stored && (slug === stored || (await slugExists(stored)))) {
-    candidates.push([stored, slug === stored ? slugPassword : null]);
+  if (stored && (await slugExists(stored))) {
+    let storedPw = null;
+    try { storedPw = sessionStorage.getItem(`slugPw:${stored}`); } catch (err) {}
+    candidates.push([stored, storedPw]);
   }
   candidates.push([randomSlug(), null]);
   for (const [s, password] of candidates) {
@@ -2127,8 +2217,8 @@ async function shareURLText(url) {
 let slug = null;             // aktywny slug (z URL lub po zapisie)
 let slugHasPassword = false; // stan sluga na serwerze (baner statusu)
 let slugPassword = null;     // hasło w pamięci sesji — do zapisu chronionego sluga
-let slugOwned = false;       // slug utworzony/zapisany w tej sesji — tylko wtedy
-                             // localStorage obecności jest nasz do pisania
+let slugFree = false;        // adres /s/x jeszcze nie zajęty — można go zająć
+let slugLocked = false;      // chroniony hasłem bez hasła w sesji — strona zasłonięta
 let slugSaveTimer = null;
 
 const SLUG_RE = /^[a-z0-9._~-]{3,64}$/;
@@ -2179,8 +2269,13 @@ function rememberSlug(s, password) {
 }
 
 async function slugExists(s) {
+  // hasło z sesji (chroniony slug własny) — bez niego GET dostaje 401
+  let pw = null;
+  try { pw = sessionStorage.getItem(`slugPw:${s}`); } catch (err) {}
   try {
-    const res = await fetch(`/api/saves/${encodeURIComponent(s)}`);
+    const res = await fetch(`/api/saves/${encodeURIComponent(s)}`, {
+      headers: pw ? { "X-Slug-Password": pw } : {},
+    });
     return res.ok;
   } catch (err) {
     return false;
@@ -2205,7 +2300,7 @@ async function saveToSlug(s, password, opts = {}) {
     if (res.ok) {
       const data = await res.json();
       slug = s;
-      slugOwned = true; // zapis pod tym slugem — od teraz nasz
+      slugFree = false; // adres zajęty
       slugHasPassword = data.has_password;
       // hasło zawsze odzwierciedla ten zapis — zapis pod inny slug
       // (np. publiczny) nie może dziedziczyć starego hasła
@@ -2276,12 +2371,18 @@ function renderSlugBar() {
   status.textContent = "";
   actions.textContent = "";
   const link = h("a", { href: slugURL(slug), text: `/s/${slug}` });
+  if (slugFree) {
+    // wolny adres (np. wpisany ręcznie w URL) — edycja + autosave zajmą go
+    // (POST przy pierwszej zmianie utworzy zapis; bez edycji adres zostaje wolny)
+    status.append("Adres ", link, " jest wolny — edytuj plan, zmiany zapiszą się pod tym adresem");
+    return;
+  }
   if (slugHasPassword) {
     if (slugCanWrite()) {
       status.append("Zapis: ", link, " · chroniony hasłem — zmiany zapisują się automatycznie");
       actions.append(slugBtn("Hasło…", openSlugPasswordModal));
     } else {
-      status.append("Zapis: ", link, " · chroniony hasłem — wpisz hasło, żeby edytować");
+      status.append("Zapis: ", link, " · chroniony hasłem — wpisz hasło, żeby zobaczyć i edytować");
       actions.append(slugBtn("Odblokuj", openSlugPasswordModal));
     }
   } else {
@@ -2378,8 +2479,8 @@ async function slugModalSubmit() {
     return;
   }
   if (slugHasPassword && slugPassword === null) {
-    // odblokowanie: weryfikujemy hasłem zwykłym zapisem bieżącego stanu
-    if (await saveToSlug(slug, pw || null)) {
+    // odblokowanie: GET z hasłem (zapis nadpisałby payload planu)
+    if (await unlockSlug(pw || "")) {
       closeSlugModal();
       toast("Slug odblokowany — zmiany zapisują się automatycznie.");
     }
@@ -2392,8 +2493,10 @@ async function slugModalSubmit() {
       return;
     }
     if (await putSlugPassword("", pw)) {
+      slugPassword = pw; // od teraz znamy hasło — odczyt i zapis działają
+      rememberSlug(slug, pw);
       closeSlugModal();
-      toast("Hasło ustawione — slug chroniony.");
+      toast("Hasło ustawione — slug chroniony (odczyt i zapis po hasle).");
     }
     return;
   }
@@ -2789,18 +2892,26 @@ async function init() {
   // a wybór bierzemy z payloadu zamiast loadSelection().
   slug = slugFromURL();
   let loadedSlug = null; // payload zapisu (nazwa celowo inna niż funkcja slugPayload())
+  slugLocked = false;
   if (slug) {
+    try { slugPassword = sessionStorage.getItem(`slugPw:${slug}`); } catch (err) {}
     try {
-      const res = await fetch(`/api/saves/${encodeURIComponent(slug)}`);
+      const res = await fetch(`/api/saves/${encodeURIComponent(slug)}`, {
+        headers: slugPassword ? { "X-Slug-Password": slugPassword } : {},
+      });
       if (res.ok) {
         const rec = await res.json();
         loadedSlug = rec.payload || {};
         slugHasPassword = !!rec.has_password;
-        try { slugPassword = sessionStorage.getItem(`slugPw:${slug}`); } catch (err) {}
+      } else if (res.status === 401) {
+        // hasło chroni też odczyt — bez niego payload nie wychodzi
+        slugHasPassword = true;
+        slugLocked = true;
+      } else if (res.status === 404) {
+        // wolny adres — można go zająć (model codeshare); nie kasujemy sluga
+        slugFree = true;
       } else {
-        toast(res.status === 404
-          ? "Nie ma zapisu pod tym adresem — mógł wygasć (retencja)."
-          : "Nie udało się wczytać zapisu planu.");
+        toast("Nie udało się wczytać zapisu planu.");
         slug = null;
       }
     } catch (err) {
@@ -2808,6 +2919,9 @@ async function init() {
       slug = null;
     }
   }
+  // zapis chroniony hasłem bez hasła w sesji — cała strona zasłonięta
+  // (pod oknem hasła tylko tło, nic do podejrzenia)
+  document.body.classList.toggle("slug-locked", slugLocked);
   let datasetURL = "/api/dataset";
   if (loadedSlug && loadedSlug.kid != null && loadedSlug.etap != null) {
     datasetURL = `/api/dataset?kid=${loadedSlug.kid}&etap=${loadedSlug.etap}&nocookie=1`;
@@ -2835,11 +2949,7 @@ async function init() {
   const params = new URLSearchParams(location.search);
   const zParam = params.get("z");
   if (loadedSlug) {
-    // wybór z zapisu serwerowego (zidy spoza oferty kierunku odfiltrowane)
-    selected = new Set(
-      (loadedSlug.selected || []).filter((n) => courseIndex.has(n)),
-    );
-    week = loadedSlug.week || 1;
+    await applySlugPayload(loadedSlug);
   } else if (zParam !== null) {
     selected = new Set(
       zParam.split(",")
@@ -2849,28 +2959,25 @@ async function init() {
   } else {
     await loadSelection();
   }
-  // v4 Faza 3: obecność — z payloadu sluga (zidy bieżącego kierunku) albo
-  // z localStorage (tryb ciasteczkowy / ?z=)
-  if (loadedSlug) {
-    attendance = new Map();
-    for (const [k, v] of Object.entries(loadedSlug.attendance || {})) {
-      if (v !== "present" && v !== "absent") continue;
-      if (courseIndex.has(Number(k.split(":")[0]))) attendance.set(k, v);
-    }
-  } else {
-    loadAttendanceLocal();
-  }
+  // v4 Faza 3: obecność — applySlugPayload wczytuje ją z payloadu sluga;
+  // poza slugiem — z localStorage (tryb ciasteczkowy / ?z=)
+  if (!loadedSlug) loadAttendanceLocal();
   const viewParam = params.get("view");
   if (viewParam && /^(sum|A|B|w[1-4])$/.test(viewParam)) {
     view = viewParam;
     if (viewParam[0] === "w") week = +viewParam[1];
   }
   render();
-  if (loadedSlug) {
+  if (slugLocked) {
     renderSlugBar();
-    toast(slugHasPassword && !slugCanWrite()
-      ? "Wyświetlam zapisany plan — „Odblokuj” hasłem, żeby edytować."
-      : "Wyświetlam zapisany plan — zmiany zapisują się pod tym adresem.");
+    openSlugPasswordModal(); // hasło chroni też odczyt — poproś od razu
+    toast("Ten zapis jest chroniony hasłem — wpisz je, żeby zobaczyć plan.");
+  } else if (loadedSlug) {
+    renderSlugBar();
+    toast("Wyświetlam zapisany plan — zmiany zapisują się pod tym adresem.");
+  } else if (slugFree) {
+    renderSlugBar();
+    toast("Ten adres jest wolny — edytuj plan, a zmiany zapiszą się pod tym adresem.");
   } else if (zParam !== null) {
     toast("Wyświetlam udostępniony plan — Twój własny wybór nie został nadpisany.");
   }

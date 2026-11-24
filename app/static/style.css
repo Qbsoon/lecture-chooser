@@ -244,6 +244,20 @@ html, body {
 
 .week-switch button:disabled { opacity: 0.4; cursor: default; }
 
+/* atrybut [hidden] wygrywa z regułami display w klasach — bez tego
+   „ukryte” pola formularzy (np. slug w oknie hasła) i pusty pasek sluga
+   były widoczne (display:flex w .modal-field/.slugbar nadpisywało UA styl) */
+[hidden] { display: none !important; }
+
+/* zapis chroniony hasłem, jeszcze nieodblokowany — pod oknem hasła
+   zostaje samo tło (nic do podejrzenia; payload i tak nie opuszcza serwera) */
+body.slug-locked .topbar,
+body.slug-locked #slugBar,
+body.slug-locked #courseBar,
+body.slug-locked .layout,
+body.slug-locked #statusPanel,
+body.slug-locked .site-footer { visibility: hidden; }
+
 .btn {
   border: 1px solid var(--border);
   background: var(--bg);
@@ -973,6 +987,12 @@ details.coll-box > summary .dot { width: 10px; height: 10px; border-radius: 50%;
 /* v4 Faza 3: % obecności na karcie przedmiotu */
 .course-chip.att.ok { background: var(--ok-soft); color: var(--ok); }
 .course-chip.att.warn { background: var(--warn-soft); color: var(--warn); }
+/* v4 Faza 3: % obecności per offering (wykład / laboratorium osobno) */
+.offering-att { font-size: 0.78rem; font-weight: 600; margin-top: 2px; }
+.offering-att.ok { color: var(--ok); }
+.offering-att.warn { color: var(--warn); }
+.offering-att.err { color: var(--danger); }
+
 .course-chip.att.err { background: var(--danger-soft); color: var(--danger); }
 
 .offering {

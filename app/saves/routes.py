@@ -106,9 +106,8 @@ async def saved_page(slug: str):
         validate_slug(slug)
     except SlugInvalid:
         return await render_template("index.jinja2"), 404
-    record = _store().get(slug)
-    if record is None:
-        return await render_template("index.jinja2"), 404
+    # wolny adres (nie istnieje) → strona renderuje się normalnie — frontend
+    # oferuje zajęcie sluga (model codeshare: każdy ciąg można zająć)
     return await render_template("index.jinja2")
 
 
@@ -120,6 +119,12 @@ async def api_get_save(slug: str):
     record = _store().get(slug)
     if record is None:
         return _error(404, "slug nie istnieje")
+    # v4: hasło chroni też ODCZYT — bez poprawnego hasła payload nie wychodzi
+    # (nagłówek X-Slug-Password; query param wyciekałby do logów/historii)
+    if record.has_password:
+        pw = request.headers.get("X-Slug-Password") or None
+        if not _store().verify_password(slug, pw):
+            return _error(401, "password_required")
     _store().touch(slug)
     return jsonify({
         "slug": record.slug,

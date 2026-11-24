@@ -330,6 +330,15 @@ class SavesStore:
         self._conn.commit()
         return self.get(slug)  # type: ignore[return-value]
 
+    def verify_password(self, slug: str, password: str | None) -> bool:
+        """Czy ``password`` otwiera slug (publiczny — zawsze True)."""
+        row = self._conn.execute(
+            "SELECT pw_hash FROM saves WHERE slug = ?", (slug,)
+        ).fetchone()
+        if row is None or row[0] is None:
+            return True
+        return self._verify(row[0], password or "")
+
     def touch(self, slug: str, *, now: float | None = None) -> bool:
         """Odświeża ``last_opened`` (throttle: max 1/min na slug — otwarcie
         strony odświeżanej co sekundę nie pisze do bazy za każdym razem).
