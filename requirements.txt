@@ -2,6 +2,8 @@ quart>=0.19
 beautifulsoup4>=4.12
 lxml>=5.0
 itsdangerous>=2.1
+# Hashowanie haseł zapisów planów (v4) — argon2id.
+argon2-cffi>=23.1
 # Wektorowy PDF renderowany na serwerze (opcjonalny w runtime — bez tego
 # endpoint zwraca 503, a PDF powstaje w przeglądarce).
 # Wymaga też przeglądarki: `playwright install chromium`

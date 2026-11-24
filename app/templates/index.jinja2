@@ -39,11 +39,19 @@
           <button type="button" role="menuitem" data-export="png" title="Obraz aktualnego widoku kalendarza">PNG (obraz)</button>
         </div>
       </details>
-      <button class="btn" id="shareBtn" type="button" title="Skopiuj link do tego planu (na telefonie — systemowe udostępnianie)">Udostępnij</button>
+      <button class="btn" id="shareBtn" type="button" title="Udostępnij plan linkiem /s/nazwa (na telefonie — systemowe udostępnianie)">Udostępnij</button>
+      <button class="btn" id="saveSlugBtn" type="button" title="Zapisz plan na serwerze pod własnym adresem /s/nazwa — opcjonalnie z hasłem">Zapisz</button>
       <button class="btn btn-ghost" id="resetBtn" type="button" title="Wyczyść wybór (poza obowiązkowymi)">Wyczyść</button>
     </div>
     <div class="status-chip" id="statusChip" aria-live="polite"></div>
   </header>
+
+  <!-- v4: pasek statusu zapisu (/s/<slug>) — widoczny tylko w trybie sluga;
+       wyraźnie pokazuje, czy slug jest publiczny, czy chroniony hasłem -->
+  <div class="slugbar" id="slugBar" hidden>
+    <span class="slug-status" id="slugStatus"></span>
+    <div class="slugbar-actions" id="slugActions"></div>
+  </div>
 
   <!-- krok 9: wybór kierunku (wydział → kierunek → semestr) + odświeżanie danych -->
   <div class="coursebar" id="courseBar" hidden>
@@ -82,6 +90,40 @@
   </main>
 
   <div id="toast" class="toast" role="alert" hidden></div>
+
+  <!-- v4: zapis planu na serwerze (slug + opcjonalne hasło) -->
+  <div class="modal-overlay" id="slugModal" hidden>
+    <div class="modal-card modal-card-narrow" role="dialog" aria-modal="true" aria-labelledby="slugModalTitle">
+      <div class="modal-head">
+        <h2 id="slugModalTitle">Zapisz plan na serwerze</h2>
+        <button class="modal-close" id="slugModalClose" type="button" aria-label="Zamknij" title="Zamknij">×</button>
+      </div>
+      <div class="modal-body">
+        <p id="slugModalLead">Plan zostanie zapisany pod adresem <code>/s/nazwa</code> — każdy
+          z linkem go zobaczy. Bez hasła może go też edytować każdy; z hasłem tylko
+          osoby, które je znają.</p>
+        <label class="modal-field" id="slugSlugField">
+          <span>Adres (slug)</span>
+          <input id="slugInput" type="text" autocomplete="off" autocapitalize="none"
+                 spellcheck="false" maxlength="64" placeholder="np. moj-plan-2027">
+        </label>
+        <label class="modal-field" id="slugPasswordField">
+          <span id="slugPasswordLabel">Hasło (opcjonalne)</span>
+          <input id="slugPasswordInput" type="password" autocomplete="new-password"
+                 maxlength="256" placeholder="puste = slug publiczny">
+        </label>
+        <label class="modal-field" id="slugNewPasswordField" hidden>
+          <span>Nowe hasło (puste = usuń hasło)</span>
+          <input id="slugNewPasswordInput" type="password" autocomplete="new-password"
+                 maxlength="256" placeholder="puste = slug wraca do publicznego">
+        </label>
+        <p class="modal-error" id="slugModalError" hidden></p>
+        <div class="modal-actions">
+          <button class="btn" id="slugModalSave" type="button">Zapisz</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <div class="modal-overlay" id="calendaryModal" hidden>
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="calendaryTitle">

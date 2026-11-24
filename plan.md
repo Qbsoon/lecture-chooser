@@ -1,175 +1,147 @@
-# Plan — lecture_chooser
+# Plan rozwoju lecture_chooser
 
-## Project context
+## Stan projektu (V3 — ukończone)
 
-- Quart app (`app/`) serving course datasets from `app/data/scraped/`.
-- Refresh service: `RefreshQueue` + worker (`app/scraping/queue.py`), started in
-  `create_app` only when `EKUL_LOGIN`/`EKUL_PASSWORD` are present (env or `.env`).
-- `WeeklyScheduler` (`app/scraping/scheduler.py`): once a week (default Sat 4:00
-  from `settings["scraping"]["weekly_refresh"]`) enqueues **all** catalog kids
-  with `scheduled=True` (loose limits — doesn't consume user quotas);
-  idempotent via `state.last_weekly`.
-- `ScrapeState` (`app/scraping/state.py`): persistent `state.json`
-  (day counters, queue, `last_weekly`, `scheduled`).
-- Catalog (`app/data/scraped/catalog.json`): faculties → courses
-  (`kid` → `name`, e.g. `"Informatyka (stacjonarne II stopnia)"` = kid 6089;
-  note the ambiguous `"Informatyka - grupa w języku angielskim (stacjonarne II stopnia)"` = kid 6086).
-- Tests: `tests/test_scheduler.py` — clock/RNG injected, no network.
+- Kalendarz tygodniowy z rozkładu zajęć + plan studiów, ograniczenia wyboru (`settings.json`).
+- Wybór zajęć zapisywany w **podpisanym ciasteczku** (`app/logic/selection.py`) — brak stanu po stronie serwera.
+- Tryby kalendarza: „Tydzień ogólny" (cykle A/B/1–4) i „Tydzień obecny" (rzeczywiste daty z terminarzy); nawigacja wstecz zablokowana na bieżącym tygodniu (`renderWeekSwitch`, `minW = cw`).
+- Scraping e-KUL: kolejka, scheduler, storage plikowy w `app/data/scraped/` (nadpisywany in place — brak historii wersji).
+- Stack: Quart + hypercorn, vanilla JS/CSS, testy pytest w `tests/`.
 
-## Phase 1 — Daily 4:00 refresh of favourite kids (current)
+---
 
-**Request:** in addition to the weekly cycle, every day at 4:00 refresh the
-favourite kid(s). The kid list is configured via compose env; the compose
-file ships with only the kid of "Informatyka II stopnia" (kid **6089**).
+# V4 — Obecność, zapis po stronie serwera, newsletter
 
-### Decisions
+## Wymagania (od użytkownika)
 
-- **Env var:** `FAVOURITE_KIDS` — comma-separated **kid IDs** (numbers),
-  e.g. `FAVOURITE_KIDS: "6089"` or `FAVOURITE_KIDS: "6089,155"`.
-  Read in `create_app` from env/`.env` (same merge as `EKUL_LOGIN`).
-  Inert without `EKUL_LOGIN`/`EKUL_PASSWORD` (refresh service off).
-  Kids are used as-is — no name resolution, no fuzzy matching.
-- **Scheduler shape:** extend `WeeklyScheduler` (keep class name — tests import
-  it) with optional `favourites: list[str]`; add `maybe_schedule_favourites()`;
-  `run_forever` calls both checks in the existing single loop. Update module
-  docstring (no longer only "tygodniowy").
-- **Trigger:** daily at hour from `settings["scraping"]["favourite_refresh_hour"]`
-  (new optional key, default 4 — consistent with "nothing hardcoded" philosophy).
-  Idempotent via new `state.last_daily` (ISO date of trigger day; if today's
-  hour < 4, trigger = yesterday → catch-up on next run after 4:00).
-- **Enqueue semantics:** `scheduled=True` (loose `SCHEDULED_LIMITS`, doesn't
-  consume user limits), same as weekly; existing `enqueue` dedup handles
-  collisions (e.g. Saturday 4:00 when both cycles fire).
+1. Oznaczanie obecności na zajęciach w planie; % obecności w semestrze na kartach przedmiotów.
+2. Newsletter o zmianach na kierunku — opt-in, opt-out, wysyłka przez Stalwart (SMTP).
+3. Nawigacja tygodniowa **w obie strony** (cofanie do tygodnia 1, nie tylko do bieżącego).
+4. Zapis po stronie serwera w stylu codeshare: dowolny ciąg po slashu można „zająć" jako swój; opcjonalne hasło (bez hasła = publiczny, każdy może edytować); śledzenie ostatniego otwarcia; usuwanie po 4 miesiącach bez otwarcia (retention jako env var w compose).
+5. Ochrona przed DDoS i masowym tworzeniem zapisów (zapychanie dysku); wydajna forma zapisu.
+6. Stopka: info o retention, przetwarzaniu danych i szyfrowaniu — małe linki + wyskakujące okienko.
+7. Solidne hashowanie haseł (argon2id).
 
-### Tasks
+## Architektura V4 — decyzje
 
-- [x] 1. `app/scraping/state.py`: add `last_daily: str = ""` field
-      (init, `load`, `save`, module docstring schema). Backward compatible —
-      missing key in old `state.json` → `""`.
-- [x] 2. `app/scraping/scheduler.py`:
-      - `_daily_trigger_date(now, hour)` helper (analogous to `_trigger_date`).
-      - `_favourite_settings(data_dir)` → hour (default 4).
-      - `WeeklyScheduler.__init__(..., favourites: list[int] | None = None)`;
-        `maybe_schedule_favourites()` — enqueue each favourite kid with
-        `scheduled=True`, set `state.last_daily`, save, log; `run_forever`
-        calls it alongside `maybe_schedule()`.
-- [x] 3. `app/__init__.py` (`create_app`): parse `FAVOURITE_KIDS`
-      (split on `,`, strip, `int()`, drop invalid/empty with a warning)
-      from the merged env dict; pass `favourites=` to the scheduler.
-      No new task — same scheduler loop.
-- [x] 4. `docker-compose.yml`: add to `environment`:
-      `FAVOURITE_KIDS: "6089"` (kid of "Informatyka II stopnia") with a
-      comment that it takes effect only together with
-      `EKUL_LOGIN`/`EKUL_PASSWORD`.
-- [x] 5. `app/data/settings.json`: add `"favourite_refresh_hour": 4` under
-      `scraping` (documented default; code falls back to 4 if absent).
-- [x] 6. `README.md`: document `FAVOURITE_KIDS` in the env-var table,
-      `favourite_refresh_hour` in the scraping-settings table, and the daily
-      cycle in the refresh/compose sections.
-- [x] 7. Tests (extend `tests/test_scheduler.py`):
-      - Daily trigger: before 4:00 → no; at/after 4:00 → enqueues favourite
-        kids with `scheduled=True`; idempotent same day (`last_daily`);
-        fires again next day; Saturday 4:00 collision with weekly → no
-        duplicates; kid already in queue → no duplicate.
-      - `last_daily` round-trip through `state.json`.
-      - `FAVOURITE_KIDS` parsing (valid list, junk entries dropped).
-- [x] 8. Run full test suite; verify no regressions in
-      `tests/test_scheduler.py`, `tests/test_queue.py`, `tests/test_api.py`.
+- **Storage zapisów: SQLite** (`app/data/saves/saves.db`, WAL) — pojedynczy plik, atomowe zapisy, indeksy, wydajne przy wielu rekordach; zamiast tysięcy plików. Katalog `app/data/saves/` bind-mountowany w compose **wzorcem istniejącego `./app/data/scraped`** (katalog, nie pojedynczy plik — SQLite WAL tworzy pliki poboczne `-wal`/`-shm` obok bazy, więc bind na sam plik `.db` by się wysypał).
+- **Hasła: argon2id** przez `argon2-cffi` (wymagania: memory ≥ 64 MB, iterations ≥ 3, parallelism 1–4).
+- **Rate limiting: własny, w pamięci** — token bucket per IP na endpointach zapisu/newslettera (Quart nie ma wbudowanego; unikamy zależności od zewnętrznego limitera). **Caddy już stoi przed aplikacją** (osobny kontener, poza tym repo — aplikacja nie ma i nie będzie miała dostępu do jego konfiguracji), więc warstwa L7/DDoS jest po stronie Caddy; limity w aplikacji chronią logikę biznesową (masowe claimy, wysyłka maili), a nie sam ruch HTTP.
+- **Newsletter: SMTP przez `aiosmtplib`** (Stalwart = standardowy submission: STARTTLS/587 lub SSL/465). Opt-out = podpisany URL-token (itsdangerous) w stopce każdej wiadomości — klik działa bez logowania.
+- **Detekcja zmian na kierunku:** po każdym refreshu scrapingu liczymy hash treści per (kid, etap) i zapisujemy w tabeli historii; zmiana hasha → kolejkujemy digest do subskrybentów tego kid.
+- **Obecność:** przechowywana w rekordzie zapisu (per slug), klucz = `(zid, identyfikator spotkania: data lub tydzień+cykl)`, wartość = `present | absent | none`.
 
-### Acceptance criteria
+---
 
-- With `EKUL_LOGIN`/`EKUL_PASSWORD` + `FAVOURITE_KIDS="6089"` set, at/after
-  4:00 each day kid 6089 is enqueued as a scheduled refresh; repeated checks
-  the same day do nothing; the next day it fires again.
-- Weekly cycle unchanged; Saturday overlap produces no duplicate queue entries.
-- Without `FAVOURITE_KIDS` (or without credentials) behaviour is identical
-  to today.
-- `docker-compose.yml` ships `FAVOURITE_KIDS: "6089"`.
+## Faza 1 — Nawigacja tygodni wstecz (mały frontend)
 
-### Risks / notes
+- [x] `app/static/app.js` `renderWeekSwitch()`: `minW = 1` zamiast `minW = cw` (tryb „Tydzień obecny"); przycisk ◀ aktywny aż do tygodnia 1.
+- [x] Zaktualizować komentarz/komunikaty (obecnie „wstecz tylko do bieżącego tygodnia").
+- [x] Test ręczny: cofanie do tygodnia 1, granice disabled, brak regresji w trybie ogólnym.
 
-- A kid listed in env but absent from the catalog still gets enqueued —
-  the worker's existing `WrongStepError` handling removes dead courses.
-- `state.json` schema grows by one key — old files load fine (defaults).
+**Kryteria:** w trybie „obecny" można przejść do każdego tygodnia 1..semesterWeeks w obie strony.
 
-## Phase 2 — Custom events / free days / free hours (`events.json`) (current)
+## Faza 2 — Zapis po stronie serwera (codeshare) — fundament V4
 
-**Request:** a second hand-edited, mounted file next to `exams.json` for
-custom events and custom free days / free hours — e.g. "godziny rektorskie"
-on a particular day from 14:10.
+Nowy moduł `app/saves/` (`store.py`, `routes.py`, `ratelimit.py`) + tabela SQLite.
 
-### Decisions
+- [x] **Model danych** (`saves`): `slug` (PK), `payload` (JSON: selected, week, kid, etap, attendance), `pw_hash` (NULL = publiczny), `created_at`, `updated_at`, `last_opened`, `owner_ip_hash` (hash IP do limitów, nie do identyfikacji).
+- [x] **Slug:** ciąg podany przez użytkownika po `/s/<slug>`; walidacja: 3–64 znaki, `[a-z0-9._~-]`, lista zarezerwowanych (`api`, `static`, `newsletter`, …). Claim: `POST /api/saves/<slug>` — wolny slug → zajęcie; istniejący z hasłem → 401/403 bez poprawnego hasła; istniejący bez hasła → nadpisanie przez każdego (zgodnie z wymogiem „publiczny").
+- [x] **Odczyt:** `GET /s/<slug>` — strona z planem (render jak `/`, dane z payloadu); `GET /api/saves/<slug>` — JSON; każde otwarcie aktualizuje `last_opened` (throttle: max 1 update/min na slug, żeby nie pisać przy każdym odświeżeniu). Otwarcie cudzego sluga **nie nadpisuje własnego wyboru z ciasteczka** — jak obecnie przy linkach `?z=` (tryb podglądu + toast).
+- [x] **Zarządzanie hasłem sluga:** `PUT /api/saves/<slug>/password` — ustawienie nowego hasła, zmiana (wymaga podania obecnego, jeśli ustawione) oraz **wyczyszczenie do pustego** (slug wraca do publicznego — bez tworzenia nowego sluga). Usunięcie/zmiana hasła wymaga hasła obecnego (ochrona przed przejęciem cudzego sluga).
+- [x] **Retention:** `RETENTION_DAYS` (env, domyślnie 120 = 4 miesiące); zadanie w tle (asyncio, start z aplikacją przez pełny lifespan, cykl od razu potem co 6 h) usuwa zapisy z `last_opened` starszym niż retention; logowanie liczby usuniętych.
+- [x] **Rate limiting / anti-abuse:**
+  - token bucket per IP: np. 10 claimów/h, 60 zapisów/min, 120 odczytów/min;
+  - limit rozmiaru payloadu (np. 64 KB) i liczby zajęć w wyborze;
+  - globalny cap liczby zapisów (`MAX_SAVES`, env, np. 20 000) + per-IP cap (np. 20);
+  - odpowiedź 429 z `Retry-After`; limity konfigurowalne env vars;
+  - limit prób hasła per slug+IP (np. 10/h) — ochrona przed brute force na chronionych slugach (argon2id spowalnia, ale limit i tak potrzebny);
+  - uwaga: aplikacja jest za Caddy (osobny kontener) — odczyt IP klienta przez `X-Forwarded-For` (zaufany tylko od Caddy; env `TRUSTED_PROXY`/`PROXY_HEADER` do włączenia), inaczej limity per-IP trafią na IP proxy i zablokują wszystkich.
+- [x] **Integracja z UI — slug zastępuje naiwne „Udostępnij” (`sharePlan`/`shareURL` w `app.js`):**
+  - **„Udostępnij"** (przycisk zostaje, zmienia się działanie): tworzy slug — jeśli plan ma już swój slug (pamiętany w localStorage), używa go; w przeciwnym razie generuje losowy slug, claimuje go i udostępnia link `/s/<slug>` (telefon: systemowe okno udostępniania, PC: schowek — oba istniejące mechanizmy zostają). Stare linki `?z=` nadal działają (odczyt bez zapisu).
+  - **„Zapisz"** (nowy przycisk): modal z pytaniem o **własny string sluga** (użytkownik nie zgadnie sam, że ma dopisać `/s/xyz` do URL) + opcjonalne hasło; zapisuje bieżący plan (wybór + obecność) pod slugiem; konflikt zajętego sluga z hasłem → komunikat i prośba o hasło/inny slug.
+  - **Status otwartego sluga — wyraźne oznaczenie, bez wątpliwości:** gdy użytkownik jest na `/s/<slug>`, pasek/baner pokazuje stan: „Slug publiczny — każdy może edytować" albo „Slug chroniony hasłem" (+ czy użytkownik ma do niego dostęp do zapisu). Na slugu publicznym opcja **„Ustaw hasło"**; na chronionym — „Zmień hasło" i „Usuń hasło" (oba po podaniu obecnego hasła).
+  - Zapisany slug pamiętany w localStorage i URL (`?s=slug` / `/s/slug`).
+- [x] **Ciasteczkowanie zostaje bez zmian:** domyślny tryb dla osób preferujących „po staremu" — zapis wyboru w podpisanym ciasteczku działa równolegle ze slugami; slug to opt-in przez „Udostępnij"/„Zapisz". Otwarcie `/s/<slug>` nie rusza ciasteczka użytkownika.
+- [x] **Compose/env:** bind mount `./app/data/saves:/lecture-chooser/app/data/saves` (wzorzec `./app/data/scraped` — trwałość między restartami; katalog z powodu plików WAL), `RETENTION_DAYS`, `MAX_SAVES`, `MAX_SAVES_PER_IP`, `TRUSTED_PROXY` (sieci CIDR zaufanych proxy).
+- [x] **Testy:** `tests/test_saves_store.py`, `tests/test_saves_api.py` (claim, kolizje, hasło: ustawienie/zmiana/usunięcie, próby bez hasła), `tests/test_ratelimit.py`, `tests/test_retention.py` — wszystkie przechodzą.
 
-- **File:** `app/data/events.json` — JSON list of entries, mounted `:ro`
-  in compose (same pattern as `exams.json`). Tolerant parsing: bad entries
-  skipped with a warning, never fatal (mirror `_load_exams`).
-- **Entry schema** (field `to` is the time end, `until` the date-range end —
-  no name clash):
-  - `name` (str, required) — e.g. `"Godziny rektorskie"`;
-  - `date` (ISO `YYYY-MM-DD`, required) — first day;
-  - `until` (ISO, optional) — inclusive last day of a range (default `date`);
-  - `from` (`HH:MM`, optional) — start of the affected time window;
-  - `to` (`HH:MM`, optional) — end of the window (default: end of day);
-  - `free` (bool, optional, default `true`) — `true` = zajęcia odpadają
-    w oknie; `false` = tylko informacja (badge, kafelki nietknięte).
-- **Semantics:** no `from`/`to` + `free` → whole day free (all tiles that
-  day marked, day badge). With `from` → window `[from, to|∞)`; tiles
-  **overlapping** the window on that date are marked (tile ending exactly
-  at `from` is not). `free: false` → notice only.
-- **API:** `_load_events()` in `app/main.py`; attached to `/api/dataset`
-  payload as `events` (course-independent — no zid filtering, unlike exams).
-  Uwaga: plik NIE ma pól `start`/`end` — to pola wyliczane przez loader dla
-  payloadu: `from`/`to` (`HH:MM`) przeliczane na minuty od północy
-  (`start`/`end`, `1440` = koniec dnia) plus flaga `allday` (brak
-  ograniczenia godziną); samo `to` bez `from` → okno od północy;
-  `to ≤ from` → wpis pomijany.
-- **Frontend:** only calendar mode "obecny" (concrete dates — same rule as
-  exams): day badge overlay (merged with the calendary overlay logic),
-  affected tiles only get the dimmed/struck style — no in-tile bar (user
-  feedback: the ranged stripes carry the info), and days with
-  only events join the grid columns (like `calDayMap` days). Full-day
-  stripes only for whole-day free entries; windowed free hours get a
-  striped overlay limited to the computed hour range (`.cal-free-span`,
-  positioned like tiles — fix after user feedback: whole-day stripes for
-  a 14:10+ event were misleading).
-- **ICS export:** out of scope here (possible follow-up: skip cancelled
-  occurrences in `build_ics`).
+**Kryteria:** zapis/odczyt/claim działa; publiczny slug edytowalny przez każdego, z hasłem tylko po podaniu hasła; status sluga (publiczny/chroniony) zawsze widoczny na `/s/<slug>`; hasło da się ustawić, zmienić i wyczyścić bez tworzenia nowego sluga; „Udostępnij" tworzy link `/s/<slug>`; stare linki `?z=` i tryb ciasteczkowy działają bez regresji; stare zapisy usuwane; masowe tworzenie z jednego IP blokowane limitem.
 
-### Tasks
+## Faza 3 — Obecność i % w semestrze (zależy od Fazy 1 i 2)
 
-- [x] 1. `app/main.py`: `_load_events(path)` — tolerant loader (walidacja
-      name/date/until/from/to/free; `until ≥ date`, `HH:MM` format);
-      `api_dataset` attaches `payload["events"]`.
-- [x] 2. `app/data/events.json`: przykładowy wpis (godziny rektorskie,
-      `from` bez `to`).
-- [x] 3. `docker-compose.yml`: mount
-      `- ./app/data/events.json:/lecture-chooser/app/data/events.json:ro`.
-- [x] 4. `app/static/app.js`: mapa dni z wydarzeń (rozwinięcie `date..until`);
-      w `renderCalendar` tryb "obecny" — odznaki dni, oznaczanie kafelków
-      (nachodzenie na okno wolnego), dni tylko z wydarzeniami w siatce.
-- [x] 5. `app/static/style.css`: `.cal-block.cancelled` (pasek `.free-bar`
-      w kafelkach usunięty po feedbacku — zakres pokazuje `.cal-free-span`).
-- [x] 6. `README.md`: `events.json` (format + przykłady wszystkich pól)
-      obok `exams.json`.
-- [x] 7. Tests (`tests/test_api.py`, wzorzec testów egzaminów): loader
-      pomija błędne wpisy (zła data/godzina, brak nazwy, `until < date`,
-      `free` nie-bool), toleruje brak/uszkodzony plik; `/api/dataset`
-      zawiera `events`.
-- [ ] 8. Run full test suite (together with pending Phase 1 task 8).
+- [ ] **Model:** w payloadzie zapisu mapa `attendance`: `"<zid>:<meeting_key>" -> "present"|"absent"`; `meeting_key` = data ISO dla spotkań datowanych, inaczej `w<tydzień>` (spójne z `weekOfDate`/cyklami).
+- [ ] **UI — kalendarz (tryb „obecny"):** tap/klik na kafelku zajęć → toggle obecność (obecny/nieobecny/brak); wizualne oznaczenie (✓/✗/kropka); działa też na cofniętych tygodniach (stąd Faza 1).
+- [ ] **UI — karty przedmiotów (picker):** % obecności w semestrze = obecne spotkania / wszystkie spotkania przedmiotu do dziś (lub w całym semestrze — **decyzja poniżej**); pasek/kolor progu.
+- [ ] **UI — obecność ogólna na semestr:** zbiorczy % (wszystkie zaznaczone przedmioty łącznie, ten sam mianownik co per-przedmiot) pokazany w **pasku statusu w topbarze** (obok licznika godzin/limitów — zawsze widoczny, także na mobile dzięki sticky); w trybie „obecny" aktualizuje się na żywo przy oznaczaniu.
+- [ ] **Zapis:** zmiany obecności zapisywane do zapisu serwerowego (autosave debounced) i/lub localStorage dla niezapisanych planów.
+- [ ] **Testy:** `tests/test_attendance.py` (klucze spotkań, wyliczanie %, przypadki brzegowe: zajęcia odwołane przez events.json nie liczą się do mianownika).
 
-### Acceptance criteria
+**Kryteria:** obecność oznaczalna w każdym tygodniu semestru; % widoczny na kartach przedmiotów **oraz zbiorczy % semestralny w pasku statusu**; dane przeżywają przeładowanie i udostępnienie linku.
 
-- With `{"name": "Godziny rektorskie", "date": "...", "from": "14:10"}` in
-  the mounted file, in calendar mode "obecny" the day shows a badge and
-  every tile overlapping 14:10–koniec dnia is visibly marked as cancelled;
-  tiles ending at 14:10 are untouched.
-- A whole-day free entry marks all tiles that date; `free: false` shows
-  only a badge.
-- Missing/empty/broken file → app works exactly as today (empty list).
-- General mode ("sum"/A/B) unchanged — events are date-specific.
+**⚠️ Do decyzji:** mianownik % — (a) wszystkie spotkania semestru, czy (b) tylko spotkania do dzisiaj? Domyślnie planuję (b) jako bardziej użyteczne, z przełącznikiem w UI.
 
-### Risks / notes
+## Faza 4 — Newsletter zmian na kierunku (zależy od Fazy 2 — infrastruktura DB)
 
-- `events` key in the dataset payload is additive — old frontend ignores it.
-- Time window matching is frontend-only (UI marking), consistent with how
-  exams are handled; server-side `evaluate` collision logic untouched.
+- [ ] **Subskrypcje (opt-in podwójny) — dwa zakresy:** tabela `subscribers`: `email`, `scope` (`course` | `slug`), `kid` (dla scope=course) lub `slug` (dla scope=slug), `confirmed`, `token`, `created_at`, `last_sent`:
+  - **z poziomu nie-slugu (tryb ciasteczkowy):** formularz email + kierunek — subskrypcja **całego kierunku** (wszystkie zmiany danego kid);
+  - **z poziomu sluga (`/s/<slug>`):** opcja subskrypcji **tylko wybranych na slugu przedmiotów** — subskrypcja jest powiązana ze **slugiem**, nie z zapisaną na stałe listą zidów: lista przedmiotów rozwiązywana jest **na żywo z payloadu sluga** w momencie wysyłki. Zmiana wybranych przedmiotów na slugu **nie wymaga ponownej rejestracji** — newsletter zawsze informuje o przedmiotach aktualnie wybranych na danym slugu.
+  - wysyłka maila potwierdzającego z linkiem `/newsletter/confirm?token=…` (podpisany itsdangerous); dopiero po kliknięciu `confirmed=1`.
+  - **Retencja a subskrypcje slugowe (rozstrzygnięte):** usunięcie sluga przez retention (albo nadpisanie payloadu) automatycznie: (a) subskrypcja scope=slug traci źródło — **wysyłamy ostatni mail z informacją o wygaśnięciu subskrypcji** (powód: usunięty slug przez brak otwarcia), a potem usuwamy subskrypcję, żeby nie wisiała martwa.
+- [ ] **Opt-out:** podpisany link `/newsletter/out?token=…` w stopce **każdej** wiadomości; klik = natychmiastowe usunięcie subskrypcji + strona potwierdzenia. Dodatkowo link „zarządzaj subskrypcjami" (lista subskrypcji danego maila po tokenie).
+- [ ] **Detekcja zmian:** po refreshu kierunku (hook w istniejącym `queue`/`scheduler`) hash treści per (kid, etap) → tabela `course_versions`; zmiana → wpis do `change_events` (kid, czas, diff-summary: nowe/usunięte zajęcia, zmienione terminy — z `app/core/parsers.py` porównaniem starych/nowych danych, jeśli dostępne w pamięci; minimalnie: „dane kierunku zmieniły się").
+- [ ] **Wysyłka:** zadanie cykliczne (np. co godzinę/dzień, env `NEWSLETTER_DIGEST_HOUR`) zbiera `change_events` niespłacone i wysyła digest per subskrybent (grupowanie po mailu); dla subskrypcji scope=slug digest filtrowany do zidów **aktualnie wybranych na slugu** (odczyt payloadu w momencie budowania maila); SMTP przez `aiosmtplib` z env: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_TLS` (`starttls|ssl|none`).
+- [ ] **Anti-abuse:** rate limit na zapis subskrypcji i wysyłkę maili potwierdzających (per IP i per email); cap liczby subskrypcji.
+- [ ] **Compose/env:** sekcja Stalwart w `docker-compose.yml` (zakomentowany wzorzec jak EKUL_*); bez `SMTP_HOST` usługa newslettera nie startuje (analogicznie do refresh).
+- [ ] **Testy:** `tests/test_newsletter.py` (opt-in/opt-out tokeny, digest, detekcja zmian, subskrypcja slugowa śledzi zmianę wybranych przedmiotów bez ponownej rejestracji, subskrypcja kierunkowa dostaje wszystkie zmiany kid, usunięcie sluga czyści subskrypcje slugowe), `tests/test_smtp_client.py` (mock aiosmtplib).
+
+**Kryteria:** opt-in wymaga potwierdzenia mailem; każda wiadomość ma działający opt-out; zmiana danych kierunku po refreshu skutkuje digestem; subskrypcja z nie-slugu = cały kierunek, subskrypcja ze sluga = zawsze aktualnie wybrane przedmioty sluga (bez re-rejestracji po zmianie wyboru); brak SMTP = funkcja wyłączona, aplikacja działa.
+
+## Faza 5 — Stopka / prywatność (zależy od Fazy 2 i 4 — finalne parametry)
+
+- [ ] W `templates/index.jinja2` mały link „Prywatność i dane" w stopce → modal (wzorzec istniejących pop-upów, mobile-friendly).
+- [ ] Treść modala: retention zapisów (`RETENTION_DAYS`), co przechowujemy (plan, obecność, email — tylko po opt-in), że hasła zapisów są hashowane argon2id (nigdy nieodwracalnie), ruch po HTTPS, kontakt/usuwanie danych (opt-out / usunięcie sluga).
+- [ ] W stopce newslettera: opt-out + krótkie info o przetwarzaniu.
+- [ ] Test: `tests/test_privacy_footer.py` (link i modal obecne, treść zawiera retention z env).
+
+## Faza 6 — Hardening i dokumentacja
+
+- [ ] Przegląd bezpieczeństwa: argon2id parametry, stały czas porównania slugów z hasłem (hash zawsze obecny — dummy hash dla publicznych, żeby uniknąć timing leak), brak wycieku IP w logach (hash), `Secure`/`HttpOnly`/`SameSite` na nowych ciasteczkach.
+- [ ] README: nowe env vars (retention, SMTP, limity, `TRUSTED_PROXY`), sekcja „Prywatność"; notka, że ruch idzie przez istniejącego Caddy (osobny kontener, konfiguracja poza tym repo) — ewentualne limity na poziomie proxy (np. moduł `rate_limit`) konfiguruje się tam, nie w tej aplikacji.
+- [ ] `requirements.txt`: `argon2-cffi`, `aiosmtplib`.
+- [ ] Przegląd wydajności zapisów: benchmark claim/save pod limitem (cel: <10 ms na zapis przy 20k rekordów).
+
+---
+
+## Zależności
+
+```mermaid
+graph LR
+  F1[Faza 1: tydzień wstecz] --> F3
+  F2[Faza 2: zapisy SQLite] --> F3
+  F2 --> F4[Newsletter]
+  F2 --> F5[Stopka/prywatność]
+  F4 --> F5
+  F3 --> F6[Hardening + docs]
+  F4 --> F6
+```
+
+## Ryzyka
+
+- **Spory payload zapisu przy dużej obecności** — mapa attendance rośnie; limit 64 KB + ewaluacja kompresji (zlib w payloadzie) jeśli potrzebna.
+- **Detekcja zmian bez historii wersji** — scraping nadpisuje pliki in place; hash po refreshu wykryje zmianę, ale nie da pełnego diffu (co się zmieniło) bez przechowywania poprzedniej wersji. Minimalnie: „zmieniło się", docelowo: snapshot metadanych zajęć w `course_versions`.
+- **Publiczne slugi bez hasła = vandalizm/walka o nazwy** — zgodnie z wymogiem użytkownika; łagodzone przez `updated_at`, możliwość hasła i jego zmiany/usunięcia bez nowego sluga.
+- **Brute force haseł slugów** — argon2id + limit prób per slug+IP; publiczny slug można „przejąć" tylko przez ustawienie hasła, więc ustawienie hasła na slugu publicznym powinno być możliwe tylko dla… każdego (zgodnie z wymogiem) — ryzyko akceptowane, bo slug publiczny z definicji należy do nikogo.
+- **Stalwart jako open relay dla potwierdzeń** — limity wysyłki per email/IP; bounces → automatyczne usunięcie subskrypcji po N twardych odbiciach.
+
+## Otwarte decyzje (do potwierdzenia przed implementacją)
+
+1. Mianownik % obecności: do dziś vs cały semestr (plan: do dziś + przełącznik).
+2. Prefiks ścieżki zapisów: `/s/<slug>` (plan) — czy inny?
+3. Czy obecność ma być dostępna także bez zapisu na serwerze (tylko localStorage)? (plan: tak, localStorage jako fallback).
+4. Częstotliwość digestu newslettera: co godzinę vs raz dziennie (plan: raz dziennie, env).
+5. ~~Subskrypcja slugowa po usunięciu sluga przez retention~~ — **rozstrzygnięte:** ostatni mail z informacją o wygaśnięciu, potem usunięcie subskrypcji.
+
+## Następne zadanie
+
+**Faza 3 — Obecność i % w semestrze** (Fazy 1 i 2 ukończone; weryfikacja ręczna UI odroczona do testów live po zakończeniu całości V4). Przed startem potwierdzić decyzję nr 1 (mianownik %: do dziś vs cały semestr — plan: do dziś + przełącznik).

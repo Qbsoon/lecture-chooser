@@ -65,7 +65,7 @@ try {
 
 // Tryb kalendarza (v3, krok 5): "general" = tydzień ogólny (cykle, jak
 // dotychczas), "current" = tydzień obecny (rzeczywiste daty z terminarzy,
-// nawigacja od bieżącego tygodnia do końca danych kierunku).
+// nawigacja w obie strony: tydzień 1 ← → koniec danych kierunku, v4).
 let calMode = "general";
 // Wyświetlany tydzień w trybie "obecny": null = bieżący wg dzisiejszej daty
 // (stan ulotny — po przeładowaniu wracamy do bieżącego tygodnia).
@@ -1113,7 +1113,7 @@ function renderModeSwitch() {
     },
   }, h("span", { text: label })));
   btn("general", "Tydzień ogólny", "Widok cykli (sumarycznie / A / B / 1–4)");
-  btn("current", "Tydzień obecny", "Rzeczywiste daty z terminarzy, od bieżącego tygodnia");
+  btn("current", "Tydzień obecny", "Rzeczywiste daty z terminarzy, nawigacja w obie strony");
 }
 
 /* ---------- przełącznik widoków / nawigacja tygodni ---------- */
@@ -1123,12 +1123,12 @@ function renderWeekSwitch() {
   box.textContent = "";
 
   if (calMode === "current") {
-    // Nawigacja: bieżący tydzień ← → koniec danych kierunku (bez przewijania
-    // poza dane; wstecz tylko do bieżącego tygodnia). Stan ulotny — po
-    // przeładowaniu wracamy do bieżącego tygodnia (curWeek nie jest zapisywany).
-    const cw = currentWeek();
+    // Nawigacja: tydzień 1 ← → koniec danych kierunku (bez przewijania poza
+    // dane; wstecz do początku semestru — potrzebne do oznaczania obecności
+    // w przeszłości, v4). Stan ulotny — po przeładowaniu wracamy do bieżącego
+    // tygodnia (curWeek nie jest zapisywany).
     const w = displayedWeek();
-    const minW = cw;
+    const minW = 1;
     const maxW = Math.max(1, semesterWeeks);
     const monday = weekMonday(w);
     const sunday = new Date(monday);
@@ -1850,8 +1850,9 @@ async function exportPDFFromServer() {
 /* ---------- udostępnianie planu linkiem ---------- */
 
 function shareURL() {
-  // Link do aktualnego planu: wybór (?z=) + widok. Bez cookies — odbiorca
-  // widzi plan, ale jego własny zapisany wybór pozostaje nietknięty.
+  // Stary format linku (?z=) — fallback, gdy zapis sluga się nie uda
+  // (limit serwera, brak sieci). Bez cookies — odbiorca widzi plan, ale
+  // jego własny zapisany wybór pozostaje nietknięty.
   const params = new URLSearchParams({ view });
   const z = [...selected].join(",");
   if (z) params.set("z", z);
@@ -1884,7 +1885,27 @@ async function sharePlan() {
     toast("Najpierw wybierz zajęcia — inaczej link prowadzi do pustego planu.");
     return;
   }
-  const url = shareURL();
+  // v4: „Udostępnij” tworzy/odświeża slug i udostępnia link /s/<slug>
+  // (odbiorca widzi plan; jego własny wybór/ciasteczko zostają nietknięte).
+  // Kolejno: zapamiętany slug (o ile istnieje na serwerze), potem świeży
+  // losowy. Gdy nic się nie uda (limit, chroniony bez hasła, brak sieci) —
+  // spadamy do starego linku ?z=, który działa bez zapisu na serwerze.
+  const candidates = [];
+  const stored = storedSlug();
+  if (stored && (slug === stored || (await slugExists(stored)))) {
+    candidates.push([stored, slug === stored ? slugPassword : null]);
+  }
+  candidates.push([randomSlug(), null]);
+  for (const [s, password] of candidates) {
+    if (await saveToSlug(s, password, { silent: true })) {
+      await shareURLText(slugURL(slug));
+      return;
+    }
+  }
+  await shareURLText(shareURL());
+}
+
+async function shareURLText(url) {
   // Telefon: natywne, systemowe okno udostępniania (aplikacje, mail, itd.).
   if (navigator.share) {
     try {
@@ -1901,6 +1922,316 @@ async function sharePlan() {
     toast("Link skopiowany do schowka — możesz go komuś wysłać.");
   } catch (err) {
     toast("Nie udało się skopiować linku.");
+  }
+}
+
+/* ---------- zapisy na serwerze (slug, v4 Faza 2) ---------- */
+
+// Model codeshare: dowolny ciąg po /s/ można zająć jako swój (opcjonalnie
+// z hasłem; bez hasła edytuje każdy). „Udostępnij” tworzy/odświeża slug,
+// „Zapisz” pyta o własny adres. Ciasteczko wyboru działa równolegle —
+// otwarcie /s/<slug> go nie rusza (dataset z nocookie=1).
+let slug = null;             // aktywny slug (z URL lub po zapisie)
+let slugHasPassword = false; // stan sluga na serwerze (baner statusu)
+let slugPassword = null;     // hasło w pamięci sesji — do zapisu chronionego sluga
+let slugSaveTimer = null;
+
+const SLUG_RE = /^[a-z0-9._~-]{3,64}$/;
+
+function slugFromURL() {
+  // slug to z definicji [a-z0-9._~-] — te znaki nie wymagają dekodowania,
+  // a decodeURIComponent na zniekształconym URL (%E0%A4%A) rzuciłby
+  // URIError i wywalił całą init(); bierzemy surowy fragment ścieżki
+  const m = location.pathname.match(/^\/s\/([^/]+)$/);
+  if (m) return m[1];
+  return new URLSearchParams(location.search).get("s");
+}
+
+function randomSlug() {
+  // „plan-” + 6 znaków base36 — kolizje mało prawdopodobne, a slug
+  // czytelny; własny adres można zawsze wybrać przez „Zapisz”.
+  return `plan-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function slugURL(s) {
+  return `${location.origin}/s/${encodeURIComponent(s)}`;
+}
+
+function slugCanWrite() {
+  return !!slug && (!slugHasPassword || slugPassword !== null);
+}
+
+function slugPayload() {
+  return {
+    selected: [...selected],
+    week,
+    kid: course?.kid ?? null,
+    etap: course?.etap ?? null,
+    attendance: {}, // v4 Faza 3: oznaczenia obecności
+  };
+}
+
+function storedSlug() {
+  try { return localStorage.getItem("savedSlug"); } catch (err) { return null; }
+}
+
+function rememberSlug(s, password) {
+  try {
+    localStorage.setItem("savedSlug", s);
+    if (password) sessionStorage.setItem(`slugPw:${s}`, password);
+    else sessionStorage.removeItem(`slugPw:${s}`);
+  } catch (err) {}
+}
+
+async function slugExists(s) {
+  try {
+    const res = await fetch(`/api/saves/${encodeURIComponent(s)}`);
+    return res.ok;
+  } catch (err) {
+    return false;
+  }
+}
+
+async function saveToSlug(s, password, opts = {}) {
+  // Zapis/claim sluga. Zwraca true przy sukcesie; 401 (chroniony bez
+  // hasła / złe hasło) i inne błędy → false (+ komunikat, o ile nie silent).
+  if (!SLUG_RE.test(s || "")) {
+    if (!opts.silent) showSlugModalError("Adres: 3–64 znaki z a–z, cyfr oraz . _ ~ -");
+    return false;
+  }
+  const body = { payload: slugPayload() };
+  if (password) body.password = password;
+  try {
+    const res = await fetch(`/api/saves/${encodeURIComponent(s)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      slug = s;
+      slugHasPassword = data.has_password;
+      // hasło zawsze odzwierciedla ten zapis — zapis pod inny slug
+      // (np. publiczny) nie może dziedziczyć starego hasła
+      slugPassword = password || null;
+      rememberSlug(s, slugPassword);
+      const path = `/s/${encodeURIComponent(s)}`;
+      if (location.pathname !== path) history.replaceState(null, "", path);
+      renderSlugBar();
+      return true;
+    }
+    if (res.status === 401) {
+      const data = await res.json().catch(() => ({}));
+      if (data.error === "wrong_password") {
+        slugPassword = null;
+        try { sessionStorage.removeItem(`slugPw:${s}`); } catch (err) {}
+        if (opts.silent) toast("Zapis do sluga odrzucony — złe hasło.");
+        else showSlugModalError("Złe hasło.");
+      } else if (opts.silent) {
+        toast("Slug chroniony hasłem — użyj „Zapisz”, żeby podać hasło.");
+      } else {
+        showSlugModalError("Ten slug jest chroniony hasłem — podaj je poniżej.");
+      }
+      renderSlugBar();
+      return false;
+    }
+    if (!opts.silent) {
+      const msgs = {
+        400: "Zły adres (slug): 3–64 znaki z a–z, cyfr oraz . _ ~ -",
+        413: "Plan za duży do zapisu na serwerze.",
+        429: "Zbyt wiele prób — odczekaj chwilę.",
+        507: "Serwer osiągnął limit zapisów — spróbuj później.",
+      };
+      showSlugModalError(msgs[res.status] || "Nie udało się zapisać planu.");
+    } else if (opts.autosave) {
+      // autosave nie może failować po cichu — użytkownik edytuje w
+      // przekonaniu, że zapisane; po przeładowaniu zmiany by zniknęły
+      toast("Zapis na serwer nie udał się — zmiany tylko lokalnie.");
+    }
+    return false;
+  } catch (err) {
+    if (!opts.silent) showSlugModalError("Brak połączenia z serwerem.");
+    else if (opts.autosave) toast("Zapis na serwer nie udał się — zmiany tylko lokalnie.");
+    return false;
+  }
+}
+
+function scheduleSlugSave() {
+  // autosave: zmiany wyboru zapisują się do aktywnego sluga (debounce 1 s);
+  // chroniony slug bez hasła w pamięci sesji — nie zapisuje sam
+  if (!slugCanWrite()) return;
+  clearTimeout(slugSaveTimer);
+  slugSaveTimer = setTimeout(async () => {
+    if (await saveToSlug(slug, slugPassword, { silent: true, autosave: true })) return;
+    renderSlugBar();
+  }, 1000);
+}
+
+function renderSlugBar() {
+  const bar = $("slugBar");
+  if (!bar) return;
+  if (!slug) {
+    bar.hidden = true;
+    return;
+  }
+  bar.hidden = false;
+  const status = $("slugStatus");
+  const actions = $("slugActions");
+  status.textContent = "";
+  actions.textContent = "";
+  const link = h("a", { href: slugURL(slug), text: `/s/${slug}` });
+  if (slugHasPassword) {
+    if (slugCanWrite()) {
+      status.append("Zapis: ", link, " · chroniony hasłem — zmiany zapisują się automatycznie");
+      actions.append(slugBtn("Hasło…", openSlugPasswordModal));
+    } else {
+      status.append("Zapis: ", link, " · chroniony hasłem — wpisz hasło, żeby edytować");
+      actions.append(slugBtn("Odblokuj", openSlugPasswordModal));
+    }
+  } else {
+    status.append("Zapis: ", link, " · publiczny — każdy z linkiem może go edytować");
+    actions.append(slugBtn("Ustaw hasło", openSlugPasswordModal));
+  }
+  actions.append(slugBtn("Kopiuj link", copySlugLink));
+}
+
+function slugBtn(label, onclick) {
+  return h("button", { class: "btn btn-slug", type: "button", onclick },
+    h("span", { text: label }));
+}
+
+async function copySlugLink() {
+  try {
+    await copyText(slugURL(slug));
+    toast("Link skopiowany do schowka.");
+  } catch (err) {
+    toast("Nie udało się skopiować linku.");
+  }
+}
+
+/* ---------- modal sluga (Zapisz / hasło) ---------- */
+
+let slugModalMode = "save"; // "save" | "password"
+
+function openSlugSaveModal() {
+  slugModalMode = "save";
+  $("slugModalTitle").textContent = "Zapisz plan na serwerze";
+  $("slugModalLead").hidden = false;
+  $("slugSlugField").hidden = false;
+  $("slugPasswordField").hidden = false;
+  $("slugNewPasswordField").hidden = true;
+  $("slugPasswordLabel").textContent = "Hasło (opcjonalne)";
+  $("slugPasswordInput").placeholder = "puste = slug publiczny (każdy może edytować)";
+  $("slugInput").value = slug || storedSlug() || randomSlug();
+  $("slugPasswordInput").value = "";
+  $("slugModalSave").textContent = "Zapisz";
+  showSlugModalError(null);
+  $("slugModal").hidden = false;
+  document.body.style.overflow = "hidden";
+}
+
+function openSlugPasswordModal() {
+  slugModalMode = "password";
+  const locked = slugHasPassword && slugPassword === null;
+  const changing = slugHasPassword && !locked; // zmiana/usunięcie hasła
+  $("slugModalTitle").textContent = locked
+    ? `Odblokuj /s/${slug}`
+    : slugHasPassword ? `Hasło /s/${slug}` : `Ustaw hasło /s/${slug}`;
+  $("slugModalLead").hidden = true;
+  $("slugSlugField").hidden = true;
+  $("slugPasswordField").hidden = false;
+  // drugie pole (nowe hasło) tylko przy zmianie hasła na chronionym slugu
+  $("slugNewPasswordField").hidden = !changing;
+  $("slugPasswordLabel").textContent = locked ? "Hasło" : changing ? "Obecne hasło" : "Nowe hasło";
+  $("slugPasswordInput").placeholder = locked
+    ? "hasło sluga"
+    : changing ? "obecne hasło" : "hasło chroniące slug";
+  $("slugPasswordInput").value = "";
+  $("slugNewPasswordInput").value = "";
+  $("slugModalSave").textContent = locked ? "Odblokuj" : "Zapisz hasło";
+  showSlugModalError(null);
+  $("slugModal").hidden = false;
+  document.body.style.overflow = "hidden";
+}
+
+function closeSlugModal() {
+  $("slugModal").hidden = true;
+  // nie odblokowujemy scrolla, jeśli otwarty jest inny modal (kalendarium)
+  document.body.style.overflow = $("calendaryModal").hidden ? "" : "hidden";
+}
+
+function showSlugModalError(msg) {
+  const el = $("slugModalError");
+  if (msg) {
+    el.textContent = msg;
+    el.hidden = false;
+  } else {
+    el.hidden = true;
+  }
+}
+
+async function slugModalSubmit() {
+  const pw = $("slugPasswordInput").value;
+  const newPw = $("slugNewPasswordInput").value;
+  if (slugModalMode === "save") {
+    const s = $("slugInput").value.trim().toLowerCase();
+    if (await saveToSlug(s, pw || null)) {
+      closeSlugModal();
+      toast(`Zapisano pod /s/${s} — link w pasku adresu.`);
+    }
+    return;
+  }
+  if (slugHasPassword && slugPassword === null) {
+    // odblokowanie: weryfikujemy hasłem zwykłym zapisem bieżącego stanu
+    if (await saveToSlug(slug, pw || null)) {
+      closeSlugModal();
+      toast("Slug odblokowany — zmiany zapisują się automatycznie.");
+    }
+    return;
+  }
+  if (!slugHasPassword) {
+    // ustawienie hasła na publicznym slugu
+    if (!pw) {
+      showSlugModalError("Podaj hasło (albo zamknij — slug zostaje publiczny).");
+      return;
+    }
+    if (await putSlugPassword("", pw)) {
+      closeSlugModal();
+      toast("Hasło ustawione — slug chroniony.");
+    }
+    return;
+  }
+  // zmiana lub usunięcie hasła (mamy je w pamięci sesji)
+  if (await putSlugPassword(slugPassword, newPw)) {
+    slugPassword = newPw || null;
+    rememberSlug(slug, slugPassword);
+    closeSlugModal();
+    toast(newPw ? "Hasło zmienione." : "Hasło usunięte — slug jest publiczny.");
+  }
+}
+
+async function putSlugPassword(oldPw, newPw) {
+  try {
+    const res = await fetch(`/api/saves/${encodeURIComponent(slug)}/password`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ old: oldPw || "", new: newPw || "" }),
+    });
+    if (res.ok) {
+      slugHasPassword = !!(newPw && newPw.length);
+      renderSlugBar();
+      return true;
+    }
+    const data = await res.json().catch(() => ({}));
+    showSlugModalError(
+      data.error === "wrong_password" ? "Złe hasło."
+      : data.error === "password_required" ? "Podaj obecne hasło."
+      : "Nie udało się zapisać hasła."
+    );
+    return false;
+  } catch (err) {
+    showSlugModalError("Brak połączenia z serwerem.");
+    return false;
   }
 }
 
@@ -2122,6 +2453,7 @@ function scheduleSave() {
 function changed() {
   render();
   scheduleSave();
+  scheduleSlugSave(); // autosave do aktywnego sluga (v4)
 }
 
 async function save() {
@@ -2175,8 +2507,36 @@ function initCalScrollMemory() {
 }
 
 async function init() {
+  // /s/<slug> lub ?s= — plan z serwera (v4). Ciasteczko użytkownika
+  // nietknięte: dataset kierunku z payloadu sluga pobieramy z nocookie=1,
+  // a wybór bierzemy z payloadu zamiast loadSelection().
+  slug = slugFromURL();
+  let loadedSlug = null; // payload zapisu (nazwa celowo inna niż funkcja slugPayload())
+  if (slug) {
+    try {
+      const res = await fetch(`/api/saves/${encodeURIComponent(slug)}`);
+      if (res.ok) {
+        const rec = await res.json();
+        loadedSlug = rec.payload || {};
+        slugHasPassword = !!rec.has_password;
+        try { slugPassword = sessionStorage.getItem(`slugPw:${slug}`); } catch (err) {}
+      } else {
+        toast(res.status === 404
+          ? "Nie ma zapisu pod tym adresem — mógł wygasć (retencja)."
+          : "Nie udało się wczytać zapisu planu.");
+        slug = null;
+      }
+    } catch (err) {
+      toast("Brak połączenia z serwerem — wczytuję wybór z ciasteczka.");
+      slug = null;
+    }
+  }
+  let datasetURL = "/api/dataset";
+  if (loadedSlug && loadedSlug.kid != null && loadedSlug.etap != null) {
+    datasetURL = `/api/dataset?kid=${loadedSlug.kid}&etap=${loadedSlug.etap}&nocookie=1`;
+  }
   try {
-    const res = await fetch("/api/dataset");
+    const res = await fetch(datasetURL);
     if (!res.ok) throw new Error("dataset");
     dataset = await res.json();
     course = dataset.course || null;
@@ -2195,7 +2555,13 @@ async function init() {
   // Z URL korzysta także headless Chromium z /api/selection.pdf.
   const params = new URLSearchParams(location.search);
   const zParam = params.get("z");
-  if (zParam !== null) {
+  if (loadedSlug) {
+    // wybór z zapisu serwerowego (zidy spoza oferty kierunku odfiltrowane)
+    selected = new Set(
+      (loadedSlug.selected || []).filter((n) => courseIndex.has(n)),
+    );
+    week = loadedSlug.week || 1;
+  } else if (zParam !== null) {
     selected = new Set(
       zParam.split(",")
         .map((s) => parseInt(s, 10))
@@ -2210,7 +2576,12 @@ async function init() {
     if (viewParam[0] === "w") week = +viewParam[1];
   }
   render();
-  if (zParam !== null) {
+  if (loadedSlug) {
+    renderSlugBar();
+    toast(slugHasPassword && !slugCanWrite()
+      ? "Wyświetlam zapisany plan — „Odblokuj” hasłem, żeby edytować."
+      : "Wyświetlam zapisany plan — zmiany zapisują się pod tym adresem.");
+  } else if (zParam !== null) {
     toast("Wyświetlam udostępniony plan — Twój własny wybór nie został nadpisany.");
   }
 
@@ -2241,6 +2612,18 @@ async function init() {
   }
 
   $("shareBtn").addEventListener("click", sharePlan);
+  $("saveSlugBtn").addEventListener("click", openSlugSaveModal);
+  $("slugModalSave").addEventListener("click", slugModalSubmit);
+  $("slugModalClose").addEventListener("click", closeSlugModal);
+  $("slugModal").addEventListener("click", (ev) => {
+    if (ev.target === $("slugModal")) closeSlugModal();
+  });
+  // Enter w modalu = zatwierdzenie
+  for (const id of ["slugInput", "slugPasswordInput", "slugNewPasswordInput"]) {
+    $(id).addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") slugModalSubmit();
+    });
+  }
 
   const themeSelect = $("themeSelect");
   if (themeSelect) {
@@ -2258,6 +2641,7 @@ async function init() {
       week = 1;
       view = "sum";
       render();
+      scheduleSlugSave(); // w trybie sluga wyczyszczenie też trafia do zapisu
     } catch (err) {
       toast("Brak połączenia z serwerem.");
     }
@@ -2272,6 +2656,7 @@ async function init() {
   });
   document.addEventListener("keydown", (ev) => {
     if (ev.key === "Escape" && !$("calendaryModal").hidden) closeCalendary();
+    if (ev.key === "Escape" && !$("slugModal").hidden) closeSlugModal();
   });
 }
 

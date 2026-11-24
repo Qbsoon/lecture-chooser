@@ -208,7 +208,13 @@ async def api_dataset() -> dict:
     payload["events"] = _load_events()
     payload["course"] = {"kid": course[0], "etap": course[1]}
     response = jsonify(payload)
-    if "kid" in request.args and "etap" in request.args:
+    # nocookie=1 — tryb sluga (/s/<slug>): dataset cudzego/obcego kierunku
+    # bez nadpisywania ciasteczka kursu użytkownika (podgląd nie rusza stanu)
+    if (
+        "kid" in request.args
+        and "etap" in request.args
+        and not request.args.get("nocookie")
+    ):
         selected, week, _ck_kid, _ck_etap = loads_selection(
             request.cookies.get(COOKIE_NAME), current_app.config["SECRET_KEY"]
         )

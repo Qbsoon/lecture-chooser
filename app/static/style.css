@@ -267,6 +267,55 @@ html, body {
   color: var(--danger);
 }
 
+/* ---------- zapisy planu na serwerze (slug, v4) ---------- */
+
+.slugbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 14px;
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+
+.slugbar a { color: var(--accent); font-weight: 600; }
+
+.slugbar-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.btn-slug { padding: 4px 10px; font-size: 0.8rem; box-shadow: none; }
+
+/* węższa karta modala (formularz zapisu/hasła nie potrzebuje 720px) */
+.modal-card-narrow { max-width: 460px; }
+
+.modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 10px 0;
+  font-size: 0.9rem;
+}
+
+.modal-field input {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.95rem;
+}
+
+.modal-error { color: var(--danger); font-size: 0.85rem; margin: 6px 0; }
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
 /* ---------- pop-up kalendarium ---------- */
 
 .modal-overlay {

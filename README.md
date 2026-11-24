@@ -265,7 +265,8 @@ Kalendarz ma dwa tryby (przełącznik obok przełącznika widoków):
 - **„Tydzień obecny"** — widok z konkretnymi datami z terminarzy (`sales/{zid}.html`).
   Tydzień wyliczany z dzisiejszej daty na podstawie zakresu danych kierunku;
   nawigacja tydzień w przód **do końca danych** (bez przewijania poza dane),
-  wstecz tylko do bieżącego tygodnia. Wpisy bez terminarza — fallback na cykle.
+  wstecz **do początku semestru** (od v4 — potrzebne do oznaczania obecności
+  w przeszłości). Wpisy bez terminarza — fallback na cykle.
 
 ### Nakładka dni wolnych (tryb „Tydzień obecny")
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import os
 from contextlib import suppress
@@ -12,6 +13,9 @@ from quart import Quart
 from .core.dataset import DatasetCache
 from .logic.pdf import close_pdf_renderer
 from .main import bp
+from .saves.ratelimit import RateLimiter
+from .saves.routes import bp as saves_bp
+from .saves.store import SavesStore
 from .scraping.queue import build_refresh_service
 from .scraping.scheduler import WeeklyScheduler
 
@@ -53,6 +57,33 @@ def _asset_version(static_dir: Path) -> str:
         return "1"
 
 
+def _env_int(raw: str | None, default: int) -> int:
+    """Int z env var; zła/pusta wartość → domyślna (błędna konfiguracja
+    nigdy nie wywraca aplikacji)."""
+    try:
+        return int(raw) if raw not in (None, "") else default
+    except ValueError:
+        logger.warning("zła wartość int w env: %r — używam %d", raw, default)
+        return default
+
+
+def _parse_trusted_proxies(raw: str | None) -> list:
+    """Sieci/adresy zaufanych proxy z ``TRUSTED_PROXY`` (po przecinku,
+    np. ``172.16.0.0/12``). Puste → brak zaufania (X-Forwarded-For
+    ignorowany). Złe wpisy pomijane z ostrzeżeniem — błędna konfiguracja
+    nigdy nie wywraca aplikacji."""
+    networks: list = []
+    for chunk in (raw or "").split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        try:
+            networks.append(ipaddress.ip_network(chunk, strict=False))
+        except ValueError:
+            logger.warning("TRUSTED_PROXY: pomijam zły wpis %r", chunk)
+    return networks
+
+
 def _parse_favourite_kids(raw: str | None) -> list[int]:
     """Kid ID z ``FAVOURITE_KIDS`` (oddzielone przecinkami) — ulubione kierunki.
 
@@ -89,13 +120,60 @@ def create_app(data_dir: str | None = None) -> Quart:
     app.dataset = app.datasets.get(*default_course) if default_course else None
 
     app.register_blueprint(bp)
+    app.register_blueprint(saves_bp)
+
+    # v4 Faza 2: zapisy planów po stronie serwera (codeshare). Baza w
+    # ``<data_dir>/saves/saves.db`` (WAL — pliki poboczne wymagają katalogu,
+    # nie bind-mountu pojedynczego pliku). Ścieżkę można nadpisać env
+    # ``SAVES_DB`` (pełna ścieżka do pliku) — używane w testach.
+    env = {**_read_dotenv(Path(__file__).resolve().parent.parent / ".env"), **os.environ}
+    saves_db = env.get("SAVES_DB") or str(
+        (Path(data_dir) if data_dir else Path(__file__).resolve().parent / "data")
+        / "saves" / "saves.db"
+    )
+    app.saves_store = SavesStore(
+        saves_db,
+        retention_days=_env_int(env.get("RETENTION_DAYS"), 120),
+        max_saves=_env_int(env.get("MAX_SAVES"), 20_000),
+        max_saves_per_ip=_env_int(env.get("MAX_SAVES_PER_IP"), 20),
+    )
+    app.saves_limiter = RateLimiter()
+    # Za Caddy (osobny kontener) prawdziwe IP klienta jest tylko w
+    # X-Forwarded-For — ufamy mu wyłącznie dla połączeń z adresów z
+    # TRUSTED_PROXY (adresy/sieci CIDR po przecinku).
+    app.config["SAVES_TRUSTED_PROXIES"] = _parse_trusted_proxies(
+        env.get("TRUSTED_PROXY")
+    )
+
+    @app.before_serving
+    async def _start_retention() -> None:
+        store = app.saves_store
+
+        async def retention_loop() -> None:
+            # raz od razu (nadrabia przestoje), potem co 6 h — idempotentne
+            while True:
+                try:
+                    store.delete_expired()
+                except Exception:  # pragma: no cover — defensywnie
+                    logger.exception("retencja zapisów: błąd cyklu")
+                await asyncio.sleep(6 * 3600)
+
+        app.retention_task = asyncio.create_task(retention_loop())
+
+    @app.after_serving
+    async def _stop_retention() -> None:
+        task = getattr(app, "retention_task", None)
+        if task is not None:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+        app.saves_store.close()
 
     # krok 7: usługa odświeżania (kolejka + limity). Worker startuje tylko
     # przy EKUL_LOGIN/EKUL_PASSWORD — w zmiennych środowiskowych LUB w .env
     # w katalogu projektu (zmienne środowiskowe mają pierwszeństwo); pusta
     # kolejka nie wysyła żadnych żądań, więc samo wystartowanie aplikacji
     # jest bezpieczne.
-    env = {**_read_dotenv(Path(__file__).resolve().parent.parent / ".env"), **os.environ}
     refresh_service = build_refresh_service(data_dir, env=env)
     if refresh_service is not None:
         refresh_queue, refresher = refresh_service
