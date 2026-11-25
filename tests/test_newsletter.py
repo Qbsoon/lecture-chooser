@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import pytest
 
 from app import create_app
+from app.newsletter.diff import diff_course_snapshots
 from app.newsletter.service import NewsletterService
 from app.newsletter.smtp import SmtpConfig
 from app.newsletter.store import NewsletterStore
@@ -132,6 +133,150 @@ def test_state_files_do_not_trigger_change(nl, tmp_path):
     (course / "meta.json").write_text('{"fetched_at": "2026-11-24"}', encoding="utf-8")
     asyncio.run(nl.svc.on_course_refreshed(1))
     assert nl.store.events_since(1, 0) == []
+
+
+# ---------- diff zmian (szczegóły w zdarzeniu i mailu) ----------
+
+# minimalne, sparsowalne tabele S4A (konwencje z app/core/parsers.py)
+PLAN_HTML = """<html><body><table class="tabelka">
+<tr class="tabhead s4row_1"><td colspan="5">Przedmioty obligatoryjne</td></tr>
+<tr class="tabhead"><td>Lp.</td><td>Przedmiot</td><td>Pkt</td><td>Godz.</td><td>Prowadzący</td></tr>
+<tr class="s4row_0"><td>1</td><td><a href="s4a.php?zid=101">Algebra</a> (wykład)</td>
+<td>Z/5</td><td>30</td><td><a>Kowalski</a></td></tr>
+</table></body></html>"""
+
+WEEK_HTML = """<html><body><table class="tabelka" id="datatab_1">
+<tr class="tabhead s4row_1"><td colspan="5">PONIEDZIAŁEK</td></tr>
+<tr class="tabhead"><td>Sala</td><td>Godz.od-do</td><td>Cykl</td><td>Przedmiot</td><td>Prowadzący</td></tr>
+<tr class="s4row_0"><td><a>101</a></td><td>08:20 - 09:10</td><td>T</td>
+<td><a href="s4a.php?zid=101">Algebra</a> (wykład)</td><td><a>Kowalski</a></td></tr>
+</table></body></html>"""
+
+WEEK_HTML_EXTRA = WEEK_HTML.replace(
+    "</table></body></html>",
+    '<tr class="tabhead s4row_1"><td colspan="5">WTOREK</td></tr>\n'
+    '<tr class="s4row_0"><td><a>102</a></td><td>11:20 - 12:10</td><td>T</td>\n'
+    '<td><a href="s4a.php?zid=102">Fizyka</a> (laboratorium)</td>'
+    "<td><a>Nowak</a></td></tr></table></body></html>",
+)
+
+
+def _write_course(tmp_path, kid=1, plan=PLAN_HTML, week=WEEK_HTML):
+    etap = tmp_path / "scraped" / str(kid) / "1"
+    etap.mkdir(parents=True, exist_ok=True)
+    (etap / "plan.html").write_text(plan, encoding="utf-8")
+    (etap / "week.html").write_text(week, encoding="utf-8")
+
+
+def test_snapshot_saved_on_baseline(nl, tmp_path):
+    _write_course(tmp_path)
+    asyncio.run(nl.svc.on_course_refreshed(1))  # baseline — bez zdarzenia
+    assert nl.store.events_since(1, 0) == []
+    snapshot = nl.store.get_snapshot(1)
+    assert snapshot is not None
+    etap = snapshot["etapy"]["1"]
+    assert etap["offerings"]["101"]["subject"] == "Algebra"
+    assert etap["timetable"][0]["start"] == 500
+
+
+def test_hour_change_described_in_event_and_mail(nl, tmp_path):
+    """Zmiana godziny jednych zajęć w jeden dzień → konkret w zdarzeniu
+    i mailu („Zmieniono zajęcia … 08:20–09:10 → 09:20–10:10”), nie ogólny
+    komunikat."""
+    _write_course(tmp_path)
+    _confirm(nl, "a@b.pl", kid=1)
+    asyncio.run(nl.svc.on_course_refreshed(1))  # baseline
+    assert nl.sent == []
+    _write_course(tmp_path, week=WEEK_HTML.replace("08:20 - 09:10", "09:20 - 10:10"))
+    asyncio.run(nl.svc.on_course_refreshed(1))
+    events = nl.store.events_since(1, 0)
+    assert len(events) == 1
+    summary = events[0]["summary"]
+    assert "Zmieniono zajęcia" in summary
+    assert "Algebra" in summary and "poniedziałek" in summary
+    assert "08:20–09:10" in summary and "09:20–10:10" in summary
+    # mail niesie ten sam konkret (wieloliniowe summary wcięte pod znacznik czasu)
+    assert len(nl.sent) == 1
+    _to, _subject, body = nl.sent[0]
+    assert "Zmieniono zajęcia" in body and "09:20–10:10" in body
+
+
+def test_new_lecture_described_in_event(nl, tmp_path):
+    _write_course(tmp_path)
+    asyncio.run(nl.svc.on_course_refreshed(1))  # baseline
+    _write_course(tmp_path, week=WEEK_HTML_EXTRA)
+    asyncio.run(nl.svc.on_course_refreshed(1))
+    events = nl.store.events_since(1, 0)
+    assert len(events) == 1
+    summary = events[0]["summary"]
+    assert "Nowe zajęcia" in summary
+    assert "Fizyka (laboratorium)" in summary
+    assert "wtorek 11:20–12:10" in summary
+
+
+def test_cosmetic_change_is_silent(nl, tmp_path):
+    """Zmiana hasha bez zmiany danych (kosmetyka HTML) → zero zdarzeń."""
+    _write_course(tmp_path)
+    _confirm(nl, "a@b.pl", kid=1)
+    asyncio.run(nl.svc.on_course_refreshed(1))  # baseline
+    _write_course(tmp_path, plan="<!-- komentarz -->\n" + PLAN_HTML)
+    asyncio.run(nl.svc.on_course_refreshed(1))
+    assert nl.store.events_since(1, 0) == []
+    assert nl.sent == []
+
+
+def test_unparseable_change_falls_back_to_generic(nl, tmp_path):
+    """Dane, których nie da się sparsować → ogólny komunikat (nie cisza,
+    nie fałszywy diff)."""
+    _write_course(tmp_path)
+    asyncio.run(nl.svc.on_course_refreshed(1))  # baseline
+    _write_course(tmp_path, week="<html>awaria</html>")
+    asyncio.run(nl.svc.on_course_refreshed(1))
+    events = nl.store.events_since(1, 0)
+    assert len(events) == 1 and "zaktualizowane" in events[0]["summary"]
+
+
+def test_diff_offerings_meetings_and_etap_prefix():
+    old = {"etapy": {
+        "1": {"offerings": {}, "timetable": [], "meetings": {}},
+        "6": {
+            "offerings": {"10": {"subject": "Fizyka", "kind": "wykład", "group": None,
+                                  "teachers": ["A"], "points": "Z/4", "hours": 15}},
+            "timetable": [],
+            "meetings": {"10": [{"date": "2026-12-07", "start": 500, "end": 550,
+                                  "room": "101", "online": False}]},
+        },
+    }}
+    new = {"etapy": {
+        "1": {"offerings": {}, "timetable": [], "meetings": {}},
+        "6": {
+            "offerings": {"10": {"subject": "Fizyka", "kind": "wykład", "group": None,
+                                  "teachers": ["B"], "points": "Z/4", "hours": 15}},
+            "timetable": [],
+            "meetings": {"10": [{"date": "2026-12-07", "start": 560, "end": 610,
+                                  "room": "101", "online": False}]},
+        },
+    }}
+    lines = diff_course_snapshots(old, new)
+    # kilka etapów → każda linia z prefiksem semestru
+    assert all(l.startswith("[semestr 6] ") for l in lines)
+    assert any("Zmieniono termin" in l and "09:20–10:10" in l for l in lines)
+    assert any("prowadzący: A → B" in l for l in lines)
+
+
+def test_diff_removed_lecture_and_meeting():
+    old = {"etapy": {"1": {
+        "offerings": {},
+        "timetable": [{"zid": 7, "subject": "Chemia", "kind": "laboratorium",
+                       "group": "Grupa 2", "day": 2, "date": None, "start": 940,
+                       "end": 990, "cycle": "T", "room": "201", "online": False}],
+        "meetings": {"7": [{"date": "2026-12-09", "start": 940, "end": 990,
+                             "room": "201", "online": False}]},
+    }}}
+    new = {"etapy": {"1": {"offerings": {}, "timetable": [], "meetings": {}}}}
+    lines = diff_course_snapshots(old, new)
+    assert any("Odwołano zajęcia" in l and "Chemia (laboratorium, Grupa 2)" in l for l in lines)
+    assert any("Odwołany termin" in l and "2026-12-09" in l for l in lines)
 
 
 # ---------- powiadomienia o zmianach ----------

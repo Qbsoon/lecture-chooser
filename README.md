@@ -332,8 +332,12 @@ Obserwowanie zmian na kierunku (przycisk „Obserwuj”): **opt-in podwójny**
 slugiem) albo **tylko przedmioty wybrane na slugu** — subskrypcja jest
 powiązana ze slugiem i rozwiązywana na żywo z jego payloadu, więc zmiana
 wyboru nie wymaga ponownej rejestracji. Mail wychodzi **natychmiast po
-wykryciu zmiany** (hash treści kierunku po refreshu — bez zmian = cisza);
-wysyłka przez SMTP (Stalwart) — bez `SMTP_HOST`
+wykryciu zmiany** i **mówi konkretnie, co się zmieniło**: po refreshu hash
+treści kierunku wyzwala diff sparsowanych danych względem poprzedniego
+snapshotu — nowe/odwołane zajęcia, zmiana godziny/sali/cyklu, nowe i
+usunięte przedmioty, terminy z terminarzy (z prefiksem semestru przy kilku
+semestrach). Zmiana kosmetyczna HTML (bez wpływu na dane) = cisza; błąd
+parsowania = ogólny komunikat. Wysyłka przez SMTP (Stalwart) — bez `SMTP_HOST`
 usługa jest wyłączona. Usunięcie sluga przez retencję → ostatni mail
 o wygaśnięciu subskrypcji.
 

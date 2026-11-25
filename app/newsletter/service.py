@@ -1,6 +1,6 @@
-"""Serwis newslettera: detekcja zmian (hash plików kierunku po refreshu),
-maile potwierdzające, natychmiastowe powiadomienia o zmianach, wygaszanie
-subskrypcji slugowych.
+"""Serwis newslettera: detekcja zmian (hash plików kierunku po refreshu +
+diff sparsowanych danych → konkretne linie zmian), maile potwierdzające,
+natychmiastowe powiadomienia o zmianach, wygaszanie subskrypcji slugowych.
 """
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from pathlib import Path
 
 from ..scraping.catalog import load_catalog
 from ..scraping.storage import PLAN_FILE, SALES_DIR, WEEK_FILE, scraped_root
+from .diff import build_course_snapshot, diff_course_snapshots
 from .smtp import SmtpConfig, send_mail
 from .store import NewsletterStore
 
@@ -40,15 +41,41 @@ class NewsletterService:
     # ---------- detekcja zmian (hook po refreshu) ----------
 
     async def on_course_refreshed(self, kid: int) -> None:
-        """Hash treści katalogu kierunku (plan/week/sales — bez plików stanu
-        z znacznikami czasu, które zmieniają się przy każdym refreshu).
-        Zmiana → natychmiastowy mail do subskrybentów tego kierunku."""
+        """Detekcja zmian po refreshu: hash treści katalogu kierunku (plan/
+        week/sales — bez plików stanu z znacznikami czasu) jako tani
+        wyzwalacz, a po zmianie hash — diff sparsowanych danych względem
+        poprzedniego snapshotu → konkretne linie zmian w zdarzeniu i mailu.
+        Pusty diff (zmiana kosmetyczna HTML) = cisza. Snapshot budowany też
+        na baseline'ie (pierwszy refresh), żeby kolejne zmiany miały z czym
+        się porównać.
+        """
         content_hash = self._course_content_hash(kid)
         if content_hash is None:
             return
-        if not self.store.record_version(kid, content_hash):
-            return
-        self.store.add_event(kid, _EVENT_SUMMARY)
+        changed = self.store.record_version(kid, content_hash)
+        old_snapshot = self.store.get_snapshot(kid)
+        if not changed and old_snapshot is not None:
+            return  # treść identyczna — nic do roboty
+        new_snapshot = self._build_snapshot(kid)
+        if new_snapshot is not None:
+            self.store.save_snapshot(kid, new_snapshot)
+        if not changed:
+            return  # baseline — tylko zapis snapshotu pod przyszły diff
+
+        if old_snapshot is None or new_snapshot is None:
+            # brak snapshotu do porównania (pierwsza zmiana po wdrożeniu,
+            # dane się nie parsują) — ogólny komunikat zamiast diffu
+            summary = _EVENT_SUMMARY
+        else:
+            changes = diff_course_snapshots(old_snapshot, new_snapshot)
+            if not changes:
+                logger.info(
+                    "newsletter: zmiana kosmetyczna bez wpływu na dane (kid=%d)", kid
+                )
+                self.store.prune_events(time.time() - _EVENTS_TTL)
+                return
+            summary = "\n".join(changes)
+        self.store.add_event(kid, summary)
         logger.info("newsletter: wykryto zmianę danych kierunku kid=%d", kid)
         try:
             await self.notify_course(kid)
@@ -56,6 +83,15 @@ class NewsletterService:
             logger.exception("newsletter: powiadomienie o zmianie (kid=%d)", kid)
         finally:
             self.store.prune_events(time.time() - _EVENTS_TTL)
+
+    def _build_snapshot(self, kid: int) -> dict | None:
+        """Snapshot sparsowanych danych kierunku; None przy błędzie (wtedy
+        detekcja wraca do ogólnego komunikatu)."""
+        try:
+            return build_course_snapshot(self.data_dir, kid)
+        except Exception:
+            logger.exception("newsletter: nie udało się zbudować snapshotu (kid=%d)", kid)
+            return None
 
     def _course_content_hash(self, kid: int) -> str | None:
         root = scraped_root(self.data_dir) / str(kid)
@@ -188,7 +224,11 @@ class NewsletterService:
             lines.append(f"● {name}:")
             for ev in events:
                 when = datetime.fromtimestamp(ev["created_at"]).strftime("%d.%m.%Y %H:%M")
-                lines.append(f"  - {when} — {ev['summary']}")
+                # summary może być wieloliniowe (diff zmian) — pierwsza linia
+                # przy znaczniku czasu, reszta wcięta pod nią
+                summary_lines = (ev["summary"] or "").splitlines() or ["(brak szczegółów)"]
+                lines.append(f"  - {when} — {summary_lines[0]}")
+                lines.extend(f"      {ln}" for ln in summary_lines[1:])
             if sub["scope"] == "slug":
                 n = self._slug_selected_count(sub["slug"])
                 lines.append(

@@ -1,8 +1,10 @@
 """Store newslettera (SQLite, ten sam plik co zapisy — WAL pozwala na
-wiele połączeń): subskrypcje, wersje treści kierunków, zdarzenia zmian.
+wiele połączeń): subskrypcje, wersje treści kierunków, snapshoty danych
+(do diffu zmian), zdarzenia zmian.
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
 from pathlib import Path
@@ -50,6 +52,11 @@ class NewsletterStore:
                 kid        INTEGER NOT NULL,
                 created_at REAL NOT NULL,
                 summary    TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS course_snapshots (
+                kid        INTEGER PRIMARY KEY,
+                snapshot   TEXT NOT NULL,           -- JSON sparsowanych danych (diff)
+                updated_at REAL NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_events_kid
                 ON change_events(kid, created_at);
@@ -194,6 +201,30 @@ class NewsletterStore:
         )
         self._conn.commit()
         return True
+
+    def get_snapshot(self, kid: int) -> dict | None:
+        """Ostatni snapshot danych kierunku (do diffu); None, gdy brak/uszkodzony."""
+        row = self._conn.execute(
+            "SELECT snapshot FROM course_snapshots WHERE kid = ?", (kid,)
+        ).fetchone()
+        if row is None:
+            return None
+        try:
+            data = json.loads(row[0])
+        except (json.JSONDecodeError, TypeError):
+            return None
+        return data if isinstance(data, dict) else None
+
+    def save_snapshot(self, kid: int, snapshot: dict, *, now: float | None = None) -> None:
+        """Zapisuje snapshot danych kierunku (po udanym refreshu/diffie)."""
+        ts = time.time() if now is None else float(now)
+        self._conn.execute(
+            "INSERT INTO course_snapshots (kid, snapshot, updated_at) VALUES (?, ?, ?)"
+            " ON CONFLICT(kid) DO UPDATE SET snapshot = excluded.snapshot,"
+            " updated_at = excluded.updated_at",
+            (kid, json.dumps(snapshot, ensure_ascii=False, sort_keys=True), ts),
+        )
+        self._conn.commit()
 
     def add_event(self, kid: int, summary: str, *, now: float | None = None) -> None:
         ts = time.time() if now is None else float(now)
