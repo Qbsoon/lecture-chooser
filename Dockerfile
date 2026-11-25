@@ -3,10 +3,12 @@ FROM python:3.12-slim
 WORKDIR /lecture-chooser
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt \
+# libatomic1 (and other Node runtime deps) must be present BEFORE Playwright's
+# bundled node binary runs; --with-deps cannot help if node can't even start.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libatomic1 ca-certificates fonts-liberation vim-tiny nano \
+ && pip install --no-cache-dir -r requirements.txt \
  && playwright install --with-deps chromium \
- && apt-get update \
- && apt-get install -y --no-install-recommends fonts-liberation vim-tiny nano \
  && rm -rf /var/lib/apt/lists/*
 
 COPY . .
