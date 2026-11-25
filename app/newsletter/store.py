@@ -110,7 +110,7 @@ class NewsletterStore:
         self._conn.commit()
 
     def mark_sent(self, sub_id: int, ts: float) -> None:
-        """Znacznik ostatniej wysyłki digestu — kolejny zbiera zdarzenia
+        """Znacznik ostatniego powiadomienia — kolejne zbiera zdarzenia
         od tego momentu (nieudana wysyłka nie wywołuje tej metody)."""
         self._conn.execute(
             "UPDATE subscribers SET last_sent = ? WHERE id = ?", (ts, sub_id)
@@ -130,7 +130,7 @@ class NewsletterStore:
         return [self._sub(r) for r in rows]
 
     def confirmed_by_email(self) -> dict[str, list[dict]]:
-        """Potwierdzone subskrypcje pogrupowane po adresie (do digestu)."""
+        """Potwierdzone subskrypcje pogrupowane po adresie (do powiadomień)."""
         rows = self._conn.execute(
             "SELECT id, email, scope, kid, slug, confirmed, created_at, last_sent"
             " FROM subscribers WHERE confirmed = 1 ORDER BY email, id"
@@ -218,7 +218,7 @@ class NewsletterStore:
         self._conn.commit()
         return cur.rowcount
 
-    # ---------- meta (data ostatniego digestu) ----------
+    # ---------- meta (legacy; cykl digestu wycofany na rzecz wysyłki natychmiast) ----------
 
     def get_meta(self, key: str) -> str | None:
         row = self._conn.execute(

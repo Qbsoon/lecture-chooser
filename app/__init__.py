@@ -162,7 +162,6 @@ def create_app(data_dir: str | None = None) -> Quart:
             smtp_cfg,
             data_root,
             secret=app.config["SECRET_KEY"],
-            digest_hour=_env_int(env.get("NEWSLETTER_DIGEST_HOUR"), 18),
         )
     # blueprint zawsze — bez SMTP trasy odpowiadają 503 (zamiast 404)
     # i wyjaśniają, że newsletter jest wyłączony na serwerze
@@ -211,10 +210,15 @@ def create_app(data_dir: str | None = None) -> Quart:
         def _on_refreshed(kid: int) -> None:
             app.datasets.invalidate(kid)
             if app.newsletter is not None:
-                try:
-                    app.newsletter.on_course_refreshed(kid)
-                except Exception:  # detekcja nie może wywrócić workera
-                    logger.exception("newsletter: detekcja zmian (kid=%d)", kid)
+                # wysyłka natychmiast po wykryciu zmiany — worker nie może
+                # czekać na SMTP i nie może wywrócić się przez newsletter
+                async def _notify() -> None:
+                    try:
+                        await app.newsletter.on_course_refreshed(kid)
+                    except Exception:  # detekcja nie może wywrócić workera
+                        logger.exception("newsletter: detekcja zmian (kid=%d)", kid)
+
+                asyncio.create_task(_notify())
 
         refresh_queue.on_refreshed = _on_refreshed
         app.refresh_queue = refresh_queue
@@ -256,22 +260,11 @@ def create_app(data_dir: str | None = None) -> Quart:
     async def _close_pdf_renderer() -> None:
         await close_pdf_renderer()
 
-    # v4 Faza 4: cykl digestu newslettera (raz dziennie o NEWSLETTER_DIGEST_HOUR)
-    @app.before_serving
-    async def _start_newsletter() -> None:
-        if app.newsletter is None:
-            return
-        app.newsletter_task: asyncio.Task | None = asyncio.create_task(
-            app.newsletter.digest_loop()
-        )
-
+    # v4 Faza 4: newsletter wysyła natychmiast po wykryciu zmiany (hook
+    # _on_refreshed) — osobny cykl digestu nie jest już potrzebny; przy
+    # zatrzymaniu zamykamy tylko bazę subskrypcji.
     @app.after_serving
     async def _stop_newsletter() -> None:
-        task = getattr(app, "newsletter_task", None)
-        if task is not None:
-            task.cancel()
-            with suppress(asyncio.CancelledError):
-                await task
         if app.newsletter is not None:
             app.newsletter.close()
 

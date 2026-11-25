@@ -1,5 +1,6 @@
-"""Newsletter (v4 Faza 4) — store, detekcja zmian, digest, wygaszanie slugów,
-trasy opt-in/opt-out. SMTP mockowany (test_smtp_client.py testuje klienta).
+"""Newsletter (v4 Faza 4) — store, detekcja zmian, natychmiastowe
+powiadomienia, wygaszanie slugów, trasy opt-in/opt-out. SMTP mockowany
+(test_smtp_client.py testuje klienta).
 """
 from __future__ import annotations
 
@@ -27,7 +28,7 @@ def nl(tmp_path):
         host="smtp.test", port=587, user="u", password="p",
         from_addr="Plan <n@test.pl>", tls="none", base_url="http://t.pl",
     )
-    svc = NewsletterService(store, saves, cfg, tmp_path, secret="sekret", digest_hour=18)
+    svc = NewsletterService(store, saves, cfg, tmp_path, secret="sekret")
     sent: list[tuple[str, str, str]] = []
 
     async def fake_send(to, subject, body):
@@ -100,20 +101,24 @@ def test_record_version_baseline_then_change(nl):
     assert nl.store.record_version(1, "hash-b") is True   # zmiana
 
 
-def test_on_course_refreshed_creates_event_on_change(nl, tmp_path):
+def test_on_course_refreshed_creates_event_and_notifies(nl, tmp_path):
     # brak danych kierunku → brak hasha, brak zdarzenia
-    nl.svc.on_course_refreshed(99)
+    asyncio.run(nl.svc.on_course_refreshed(99))
     assert nl.store.events_since(99, 0) == []
     # tworzymy pliki kierunku (plan.html) — baseline, potem zmiana
     course = tmp_path / "scraped" / "1"
     course.mkdir(parents=True)
     (course / "plan.html").write_text("<html>v1</html>", encoding="utf-8")
-    nl.svc.on_course_refreshed(1)
+    _confirm(nl, "a@b.pl", kid=1)
+    asyncio.run(nl.svc.on_course_refreshed(1))
     assert nl.store.events_since(1, 0) == []  # baseline bez zdarzenia
+    assert nl.sent == []                      # i bez maila
     (course / "plan.html").write_text("<html>v2</html>", encoding="utf-8")
-    nl.svc.on_course_refreshed(1)
+    asyncio.run(nl.svc.on_course_refreshed(1))
     events = nl.store.events_since(1, 0)
     assert len(events) == 1 and "zaktualizowane" in events[0]["summary"]
+    # zmiana = natychmiastowy mail do subskrybenta
+    assert len(nl.sent) == 1 and nl.sent[0][0] == "a@b.pl"
 
 
 def test_state_files_do_not_trigger_change(nl, tmp_path):
@@ -122,67 +127,69 @@ def test_state_files_do_not_trigger_change(nl, tmp_path):
     course = tmp_path / "scraped" / "1"
     course.mkdir(parents=True)
     (course / "plan.html").write_text("<html>v1</html>", encoding="utf-8")
-    nl.svc.on_course_refreshed(1)
+    asyncio.run(nl.svc.on_course_refreshed(1))
     (course / "course.json").write_text('{"last_refreshed": "2026-11-24"}', encoding="utf-8")
     (course / "meta.json").write_text('{"fetched_at": "2026-11-24"}', encoding="utf-8")
-    nl.svc.on_course_refreshed(1)
+    asyncio.run(nl.svc.on_course_refreshed(1))
     assert nl.store.events_since(1, 0) == []
 
 
-# ---------- digest ----------
+# ---------- powiadomienia o zmianach ----------
 
-def test_digest_course_scope(nl):
+def test_notify_course_scope(nl):
     _confirm(nl, "a@b.pl", kid=1)
     # zdarzenia tworzy serwis w on_course_refreshed (hash → event);
-    # tu testujemy wysyłkę, więc wstawiamy zdarzenie wprost — z jawnym
-    # znacznikiem czasu WCZEŚNIEJSZYM niż wysyłka (now=1000), inaczej
-    # drugi digest uzna je za nowe
+    # tu testujemy wysyłkę, więc wstawiamy zdarzenie wprost
     nl.store.add_event(1, "Dane kierunku zaktualizowane.", now=500.0)
-    run = asyncio.run(nl.svc.send_digest(now=1000.0))
+    run = asyncio.run(nl.svc.notify_course(1))
     assert run == 1
     to, subject, body = nl.sent[0]
     assert to == "a@b.pl"
     assert "kid=1" in body and "Zrezygnuj: http://t.pl/newsletter/out?token=" in body
     sub = nl.store.list_for_email("a@b.pl")[0]
-    assert sub["last_sent"] == 1000.0
+    assert sub["last_sent"] >= 500.0
     # bez nowych zdarzeń — cisza
     nl.sent.clear()
-    assert asyncio.run(nl.svc.send_digest(now=2000.0)) == 0
+    assert asyncio.run(nl.svc.notify_course(1)) == 0
     assert nl.sent == []
 
 
-def test_digest_slug_scope_follows_payload(nl):
+def test_notify_slug_scope_follows_payload(nl):
     """Subskrypcja slugowa rozwiązuje kid i zakres z payloadu NA ŻYWO —
     zmiana wybranych przedmiotów na slugu nie wymaga ponownej rejestracji."""
     nl.saves.save("moj-plan", {"selected": [1, 2], "kid": 5, "etap": 1}, None, "ip1")
     _confirm(nl, "a@b.pl", scope="slug", slug="moj-plan")
     nl.store.add_event(5, "Dane kierunku zaktualizowane.", now=500.0)  # zdarzenie dla kid=5
-    assert asyncio.run(nl.svc.send_digest(now=1000.0)) == 1
+    assert asyncio.run(nl.svc.notify_course(5)) == 1
     to, _subject, body = nl.sent[0]
     assert to == "a@b.pl" and "/s/moj-plan" in body
-    # slug bez wybranych przedmiotów → brak digestu (nic go nie dotyczy)
+    # slug bez wybranych przedmiotów → brak powiadomienia (nic go nie dotyczy)
     nl.saves.save("moj-plan", {"selected": [], "kid": 5, "etap": 1}, None, "ip1")
     nl.store.add_event(5, "Dane kierunku zaktualizowane.", now=1500.0)  # nowe zdarzenie
     nl.sent.clear()
-    assert asyncio.run(nl.svc.send_digest(now=2000.0)) == 0
+    assert asyncio.run(nl.svc.notify_course(5)) == 0
     assert nl.sent == []
 
 
-def test_digest_groups_multiple_subs_per_email(nl):
+def test_notify_groups_multiple_subs_per_email(nl):
     _confirm(nl, "a@b.pl", kid=1)
     _confirm(nl, "a@b.pl", kid=2)
     for kid in (1, 2):
         nl.store.add_event(kid, "Dane kierunku zaktualizowane.")
-    assert asyncio.run(nl.svc.send_digest(now=1000.0)) == 1  # jeden mail
+    # refresh kid=1 → jeden mail, ale tylko o kierunku 1 (kierunek 2 bez zmian)
+    assert asyncio.run(nl.svc.notify_course(1)) == 1
     assert len(nl.sent) == 1
     _to, subject, body = nl.sent[0]
-    assert "kierunkach" in subject  # liczba mnoga — wiele kierunków
+    assert "kierunek 1" in body and "kierunek 2" not in body
+    # refresh kid=2 → druga obserwacja też dostaje swój mail
+    assert asyncio.run(nl.svc.notify_course(2)) == 1
+    _to, subject, body = nl.sent[1]
+    assert "kierunek 2" in body
     # opt-out per subskrypcja — jeden link wypisuje tylko jedną obserwację
-    assert body.count("/newsletter/out?token=") == 2
-    assert "kierunek 1" in body and "kierunek 2" in body
+    assert body.count("/newsletter/out?token=") == 1
 
 
-def test_digest_failure_does_not_mark_sent(nl):
+def test_notify_failure_does_not_mark_sent(nl):
     _confirm(nl, "a@b.pl", kid=1)
     nl.store.add_event(1, "Dane kierunku zaktualizowane.")
 
@@ -190,8 +197,19 @@ def test_digest_failure_does_not_mark_sent(nl):
         raise RuntimeError("smtp down")
 
     nl.svc._send_mail = broken
-    assert asyncio.run(nl.svc.send_digest(now=1000.0)) == 0
+    assert asyncio.run(nl.svc.notify_course(1)) == 0
     assert nl.store.list_for_email("a@b.pl")[0]["last_sent"] == 0.0
+    # retry przy następnym powiadomieniu — zdarzenie wciąż czeka
+    nl.svc._send_mail = _restore_send(nl)
+    assert asyncio.run(nl.svc.notify_course(1)) == 1
+
+
+def _restore_send(nl):
+    """Przywraca fake_send z fixture (podmieniony na broken w teście)."""
+    async def fake_send(to, subject, body):
+        nl.sent.append((to, subject, body))
+
+    return fake_send
 
 
 # ---------- wygaszanie slugów (retencja) ----------

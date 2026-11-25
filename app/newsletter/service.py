@@ -1,13 +1,13 @@
 """Serwis newslettera: detekcja zmian (hash plików kierunku po refreshu),
-maile potwierdzające, digest dzienny, wygaszanie subskrypcji slugowych.
+maile potwierdzające, natychmiastowe powiadomienia o zmianach, wygaszanie
+subskrypcji slugowych.
 """
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import logging
 import time
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 
 from ..scraping.catalog import load_catalog
@@ -30,27 +30,32 @@ class NewsletterService:
         data_dir: Path | str,
         *,
         secret: str = "",
-        digest_hour: int = 18,
     ) -> None:
         self.store = store
         self.saves = saves_store
         self.cfg = cfg
         self.data_dir = Path(data_dir)
         self._secret_key = secret
-        self.digest_hour = max(0, min(23, int(digest_hour)))
 
     # ---------- detekcja zmian (hook po refreshu) ----------
 
-    def on_course_refreshed(self, kid: int) -> None:
+    async def on_course_refreshed(self, kid: int) -> None:
         """Hash treści katalogu kierunku (plan/week/sales — bez plików stanu
         z znacznikami czasu, które zmieniają się przy każdym refreshu).
-        Zmiana → zdarzenie do digestów."""
+        Zmiana → natychmiastowy mail do subskrybentów tego kierunku."""
         content_hash = self._course_content_hash(kid)
         if content_hash is None:
             return
-        if self.store.record_version(kid, content_hash):
-            self.store.add_event(kid, _EVENT_SUMMARY)
-            logger.info("newsletter: wykryto zmianę danych kierunku kid=%d", kid)
+        if not self.store.record_version(kid, content_hash):
+            return
+        self.store.add_event(kid, _EVENT_SUMMARY)
+        logger.info("newsletter: wykryto zmianę danych kierunku kid=%d", kid)
+        try:
+            await self.notify_course(kid)
+        except Exception:  # wysyłka nie może wywrócić workera odświeżania
+            logger.exception("newsletter: powiadomienie o zmianie (kid=%d)", kid)
+        finally:
+            self.store.prune_events(time.time() - _EVENTS_TTL)
 
     def _course_content_hash(self, kid: int) -> str | None:
         root = scraped_root(self.data_dir) / str(kid)
@@ -125,39 +130,35 @@ class NewsletterService:
         )
         await self._send_mail(sub["email"], "Potwierdź obserwowanie zmian — plan zajęć", body)
 
-    async def send_digest(self, *, now: float | None = None) -> int:
-        """Digest dzienny: per adres zbiera zdarzenia wszystkich jego
-        subskrypcji (od ostatniej wysyłki); subskrypcje slugowe rozwiązują
-        kid i zakres z payloadu sluga NA ŻYWO. Zwraca liczbę wysłanych maili."""
-        ts = time.time() if now is None else float(now)
+    async def notify_course(self, kid: int) -> int:
+        """Wysyła powiadomienie o zmianach w kierunku do każdego potwierdzonego
+        subskrybenta (course scope na ten kid + slugi wskazujące ten kid, jeśli
+        mają wybrane przedmioty). Zwraca liczbę wysłanych maili; zdarzenia są
+        oznaczane jako wysłane tylko dla udanych adresów."""
         sent = 0
         for email, subs in self.store.confirmed_by_email().items():
-            blocks: list[tuple[dict, int, list[dict]]] = []
+            blocks = []
             for sub in subs:
-                kid = (
-                    sub["kid"] if sub["scope"] == "course"
-                    else self._slug_kid(sub["slug"])
-                )
-                if kid is None:
-                    continue
-                # slug bez wybranych przedmiotów — digest niczego nie dotyczy
-                if sub["scope"] == "slug" and self._slug_selected_count(sub["slug"]) == 0:
-                    continue
-                events = self.store.events_since(kid, sub["last_sent"])
-                if not events:
-                    continue
-                blocks.append((sub, kid, events))
+                if sub["scope"] == "course":
+                    if sub["kid"] != kid:
+                        continue
+                else:
+                    if self._slug_kid(sub["slug"]) != kid:
+                        continue
+                    if self._slug_selected_count(sub["slug"]) == 0:
+                        continue
+                sub_events = self.store.events_since(kid, sub["last_sent"])
+                if sub_events:
+                    blocks.append((sub, kid, sub_events))
             if not blocks:
                 continue
             try:
-                await self._send_digest_mail(email, blocks, ts)
+                await self._send_change_mail(email, blocks)
                 for sub, _kid, _events in blocks:
-                    self.store.mark_sent(sub["id"], ts)
+                    self.store.mark_sent(sub["id"], time.time())
                 sent += 1
             except Exception:
-                logger.exception("newsletter: digest do %s nie wyszedł", email)
-        self.store.set_meta("last_digest", date.today().isoformat())
-        self.store.prune_events(ts - _EVENTS_TTL)
+                logger.exception("newsletter: powiadomienie do %s nie wyszło", email)
         return sent
 
     def _slug_kid(self, slug: str | None) -> int | None:
@@ -178,8 +179,8 @@ class NewsletterService:
         selected = record.payload.get("selected")
         return len(selected) if isinstance(selected, list) else 0
 
-    async def _send_digest_mail(
-        self, email: str, blocks: list[tuple[dict, int, list[dict]]], ts: float
+    async def _send_change_mail(
+        self, email: str, blocks: list[tuple[dict, int, list[dict]]]
     ) -> None:
         lines = ["Cześć,", "", "w obserwowanych kierunkach pojawiły się zmiany:", ""]
         for sub, kid, events in blocks:
@@ -202,10 +203,10 @@ class NewsletterService:
             if len(blocks) > 1
             else f"Zmiany na kierunku {self._course_name(blocks[0][1])} — plan zajęć"
         )
-        await self._send_mail(email, subject, "\n".join(lines) + self._digest_footer(blocks))
+        await self._send_mail(email, subject, "\n".join(lines) + self._change_footer(blocks))
 
-    def _digest_footer(self, blocks: list[tuple[dict, int, list[dict]]]) -> str:
-        """Stopka digestu: opt-out per subskrypcja (digest zbiera zmiany z
+    def _change_footer(self, blocks: list[tuple[dict, int, list[dict]]]) -> str:
+        """Stopka powiadomienia: opt-out per subskrypcja (mail zbiera zmiany z
         wielu obserwacji — jeden link wypisuje tylko jedną z nich, więc
         przy kilku pokazujemy listę), zarządzanie i info o przetwarzaniu."""
         from .tokens import sign_token
@@ -262,26 +263,6 @@ class NewsletterService:
                 except Exception:
                     logger.exception("newsletter: mail o wygaśnięciu (%s)", sub["email"])
             self.store.delete_slug_subscriptions(slug)
-
-    # ---------- cykl dzienny ----------
-
-    async def digest_loop(self, *, interval: float = 300.0) -> None:
-        """Raz na 5 min sprawdza, czy pora na digest (godzina z env, domyślnie
-        18); idempotentne po dacie (newsletter_meta.last_digest)."""
-        while True:
-            try:
-                await self._maybe_send_digest()
-            except Exception:  # cykl nie może zabić pętli
-                logger.exception("newsletter: błąd cyklu digestu")
-            await asyncio.sleep(interval)
-
-    async def _maybe_send_digest(self) -> None:
-        now = datetime.now()
-        if self.store.get_meta("last_digest") == now.date().isoformat():
-            return
-        if now.hour < self.digest_hour:
-            return
-        await self.send_digest()
 
     # ---------- konfiguracja ----------
 

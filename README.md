@@ -78,7 +78,6 @@ ze zmiennych środowiskowych (te mają pierwszeństwo). Dostępne zmienne:
 | `SMTP_FROM` | nie | adres nadawcy (domyślnie `newsletter@localhost`) |
 | `SMTP_TLS` | nie | `starttls` (domyślnie) / `ssl` / `none` |
 | `BASE_URL` | nie | bazowy URL do absolutnych linków w mailach (domyślnie `http://localhost:8000`) |
-| `NEWSLETTER_DIGEST_HOUR` | nie | godzina dziennego digestu (domyślnie 18) |
 | `MAX_SUBSCRIBERS` / `MAX_SUBS_PER_EMAIL` | nie | limity subskrypcji newslettera (domyślnie 5000 / 20) |
 
 Przykładowy `.env`:
@@ -332,8 +331,9 @@ Obserwowanie zmian na kierunku (przycisk „Obserwuj”): **opt-in podwójny**
 + strona zarządzania subskrypcjami. Dwa zakresy: **cały kierunek** (poza
 slugiem) albo **tylko przedmioty wybrane na slugu** — subskrypcja jest
 powiązana ze slugiem i rozwiązywana na żywo z jego payloadu, więc zmiana
-wyboru nie wymaga ponownej rejestracji. Digest raz dziennie
-(`NEWSLETTER_DIGEST_HOUR`); wysyłka przez SMTP (Stalwart) — bez `SMTP_HOST`
+wyboru nie wymaga ponownej rejestracji. Mail wychodzi **natychmiast po
+wykryciu zmiany** (hash treści kierunku po refreshu — bez zmian = cisza);
+wysyłka przez SMTP (Stalwart) — bez `SMTP_HOST`
 usługa jest wyłączona. Usunięcie sluga przez retencję → ostatni mail
 o wygaśnięciu subskrypcji.
 

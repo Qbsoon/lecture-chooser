@@ -31,7 +31,6 @@ services:
       # SMTP_FROM: "Plan zajęć <newsletter@twoja-domena.pl>"
       # SMTP_TLS: "starttls"          # starttls | ssl | none
       # BASE_URL: "https://plan.twoja-domena.pl"   # absolutne linki w mailach
-      NEWSLETTER_DIGEST_HOUR: "18"   # godzina dziennego digestu
       # Odkomentuj i ustaw, aby włączyć usługę odświeżania:
       # EKUL_LOGIN: twoj.login@kul.lublin.pl
       # EKUL_PASSWORD: twoje-haslo

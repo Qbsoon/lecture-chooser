@@ -28,7 +28,7 @@
 - **Hasła: argon2id** przez `argon2-cffi` (wymagania: memory ≥ 64 MB, iterations ≥ 3, parallelism 1–4).
 - **Rate limiting: własny, w pamięci** — token bucket per IP na endpointach zapisu/newslettera (Quart nie ma wbudowanego; unikamy zależności od zewnętrznego limitera). **Caddy już stoi przed aplikacją** (osobny kontener, poza tym repo — aplikacja nie ma i nie będzie miała dostępu do jego konfiguracji), więc warstwa L7/DDoS jest po stronie Caddy; limity w aplikacji chronią logikę biznesową (masowe claimy, wysyłka maili), a nie sam ruch HTTP.
 - **Newsletter: SMTP przez `aiosmtplib`** (Stalwart = standardowy submission: STARTTLS/587 lub SSL/465). Opt-out = podpisany URL-token (itsdangerous) w stopce każdej wiadomości — klik działa bez logowania.
-- **Detekcja zmian na kierunku:** po każdym refreshu scrapingu liczymy hash treści per (kid, etap) i zapisujemy w tabeli historii; zmiana hasha → kolejkujemy digest do subskrybentów tego kid.
+- **Detekcja zmian na kierunku:** po każdym refreshu scrapingu liczymy hash treści per (kid, etap) i zapisujemy w tabeli historii; zmiana hasha → natychmiastowe powiadomienie subskrybentów tego kid.
 - **Obecność:** przechowywana w rekordzie zapisu (per slug), klucz = `(zid, identyfikator spotkania: data lub tydzień+cykl)`, wartość = `present | absent | none`.
 
 ---
@@ -87,23 +87,23 @@ Nowy moduł `app/saves/` (`store.py`, `routes.py`, `ratelimit.py`) + tabela SQLi
 
 - [x] **Subskrypcje (opt-in podwójny) — dwa zakresy:** tabela `subscribers` (`email`, `scope` course|slug, `kid`/`slug`, `confirmed`, `created_at`, `last_sent`) w tym samym SQLite co zapisy; deduplikacja (adres+zakres), capy `MAX_SUBSCRIBERS`/`MAX_SUBS_PER_EMAIL`:
   - **z poziomu nie-slugu (tryb ciasteczkowy):** przycisk „Obserwuj” → modal z adresem e-mail — subskrypcja **całego kierunku**;
-  - **z poziomu sluga (`/s/<slug>`):** ten sam przycisk — subskrypcja **tylko przedmiotów wybranych na slugu**, powiązana ze **slugiem**: kid i zakres rozwiązywane z payloadu sluga NA ŻYWO przy wysyłce (zmiana wyboru bez ponownej rejestracji; slug bez wybranych przedmiotów → brak digestu);
+  - **z poziomu sluga (`/s/<slug>`):** ten sam przycisk — subskrypcja **tylko przedmiotów wybranych na slugu**, powiązana ze **slugiem**: kid i zakres rozwiązywane z payloadu sluga NA ŻYWO przy wysyłce (zmiana wyboru bez ponownej rejestracji; slug bez wybranych przedmiotów → brak powiadomienia);
   - mail potwierdzający z linkiem `/newsletter/confirm?token=…` (itsdangerous, sekret SECRET_KEY); dopiero po kliknięciu `confirmed=1`;
   - **Retencja a subskrypcje slugowe:** usunięcie sluga przez retention → **ostatni mail o wygaśnięciu**, potem usunięcie subskrypcji (`delete_expired(deleted_slugs=…)` → `notify_slug_expired`).
 - [x] **Opt-out:** podpisany link `/newsletter/out?token=…` w stopce **każdej** wiadomości; klik = natychmiastowe usunięcie + strona potwierdzenia. Dodatkowo `/newsletter/manage?token=…` — lista subskrypcji adresu z linkami rezygnacji.
 - [x] **Detekcja zmian:** hook w `on_refreshed` (queue) → hash treści katalogu kierunku (`plan.html`/`week.html`/`sales/*.html` — pliki stanu z znacznikami czasu wykluczone) per kid → tabela `course_versions`; zmiana → `change_events` (kid, czas, summary). Minimalny summary („dane kierunku zaktualizowane”) zgodnie z opcją „minimalnie” z planu — pełny diff wymagałby snapshotu metadanych (odroczone, patrz Ryzyka).
-- [x] **Wysyłka:** cykl dzienny (co 5 min sprawdzenie, env `NEWSLETTER_DIGEST_HOUR`, domyślnie 18; idempotentny po dacie w `newsletter_meta`) — digest per adres (grupowanie subskrypcji, wiele kierunków = jeden mail); SMTP przez `aiosmtplib` z env `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASSWORD`/`SMTP_FROM`/`SMTP_TLS` (`starttls|ssl|none`) + `BASE_URL` (absolutne linki). Nieudana wysyłka nie oznacza subskrypcji jako obsłużonej (retry następnego cyklu).
+- [x] **Wysyłka:** natychmiast po wykryciu zmiany (hook `on_refreshed` → `notify_course(kid)`; favourite refresh codziennie, studenci mają być informowani bez zwłoki — dawny cykl dzienny z `NEWSLETTER_DIGEST_HOUR` usunięty). Mail per adres zbiera wszystkie jego obserwacje dotyczące zmienionego kierunku (course scope + slugi wskazujące ten kid); SMTP przez `aiosmtplib` z env `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASSWORD`/`SMTP_FROM`/`SMTP_TLS` (`starttls|ssl|none`) + `BASE_URL` (absolutne linki). Nieudana wysyłka nie oznacza subskrypcji jako obsłużonej (retry przy następnym powiadomieniu).
 - [x] **Anti-abuse:** rate limit (token bucket): zapis subskrypcji 5/h per IP, maile potwierdzające 5/dobę per adres, linki 30/h; capy subskrypcji (507 przy przekroczeniu).
 - [x] **Compose/env:** sekcja SMTP w `docker-compose.yml` (zakomentowany wzorzec jak EKUL_*); bez `SMTP_HOST` usługa newslettera nie startuje (aplikacja działa normalnie).
-- [x] **Testy:** `tests/test_newsletter.py` (store: deduplikacja/capy/confirm; detekcja zmian z wykluczeniem plików stanu; digest: course scope, slug scope na żywo z payloadu, grupowanie, retry po błędzie SMTP; wygaszanie slugów; tokeny; trasy: subscribe→confirm→out, manage, walidacja, 503 bez SMTP, rate limit 429), `tests/test_smtp_client.py` (mock aiosmtplib: pola wiadomości, starttls/ssl/none).
+- [x] **Testy:** `tests/test_newsletter.py` (store: deduplikacja/capy/confirm; detekcja zmian z wykluczeniem plików stanu; powiadomienia: course scope, slug scope na żywo z payloadu, grupowanie, retry po błędzie SMTP; wygaszanie slugów; tokeny; trasy: subscribe→confirm→out, manage, walidacja, 503 bez SMTP, rate limit 429), `tests/test_smtp_client.py` (mock aiosmtplib: pola wiadomości, starttls/ssl/none).
 
-**Kryteria:** opt-in wymaga potwierdzenia mailem; każda wiadomość ma działający opt-out; zmiana danych kierunku po refreshu skutkuje digestem; subskrypcja z nie-slugu = cały kierunek, subskrypcja ze sluga = zawsze aktualnie wybrane przedmioty sluga (bez re-rejestracji po zmianie wyboru); brak SMTP = funkcja wyłączona, aplikacja działa.
+**Kryteria:** opt-in wymaga potwierdzenia mailem; każda wiadomość ma działający opt-out; zmiana danych kierunku po refreshu skutkuje natychmiastowym mailem; subskrypcja z nie-slugu = cały kierunek, subskrypcja ze sluga = zawsze aktualnie wybrane przedmioty sluga (bez re-rejestracji po zmianie wyboru); brak SMTP = funkcja wyłączona, aplikacja działa.
 
 ## Faza 5 — Stopka / prywatność (zależy od Fazy 2 i 4 — finalne parametry) — UKOŃCZONA
 
 - [x] W `templates/index.jinja2` mały link „Prywatność i dane” w stopce → modal (wzorzec istniejących pop-upów, mobile-friendly).
 - [x] Treść modala: retention zapisów (`RETENTION_DAYS` przez kontekst szablonu + `default(120)`), co przechowujemy (plan, obecność, email — tylko po opt-in), hasła argon2id (nigdy nieodwracalne), HTTPS, kontakt/usuwanie danych.
-- [x] W stopce newslettera: opt-out + krótkie info o przetwarzaniu (digest: opt-out per subskrypcja przy wielu obserwacjach).
+- [x] W stopce newslettera: opt-out + krótkie info o przetwarzaniu (rozwiązanie: opt-out per subskrypcja przy wielu obserwacjach w jednym mailu).
 - [x] Test: `tests/test_privacy_footer.py` (link i modal obecne, treść zawiera retention z env, stopka newslettera).
 
 ## Faza 6 — Hardening i dokumentacja — UKOŃCZONA
@@ -141,7 +141,7 @@ graph LR
 1. Mianownik % obecności: do dziś vs cały semestr (plan: do dziś + przełącznik).
 2. Prefiks ścieżki zapisów: `/s/<slug>` (plan) — czy inny?
 3. Czy obecność ma być dostępna także bez zapisu na serwerze (tylko localStorage)? (plan: tak, localStorage jako fallback).
-4. Częstotliwość digestu newslettera: co godzinę vs raz dziennie (plan: raz dziennie, env).
+4. ~~Częstotliwość digestu newslettera~~ — **rozstrzygnięte:** wysyłka natychmiast po wykryciu zmiany (favourite odświeża się codziennie, brak zwłoki).
 5. ~~Subskrypcja slugowa po usunięciu sluga przez retention~~ — **rozstrzygnięte:** ostatni mail z informacją o wygaśnięciu, potem usunięcie subskrypcji.
 
 ## Następne zadanie
